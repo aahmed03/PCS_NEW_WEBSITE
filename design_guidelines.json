@@ -1,0 +1,182 @@
+{
+  "design_system": {
+    "identity": {
+      "name": "Primary Care Services, S.C.",
+      "tone": "Professional, Trustworthy, Modern, Empathetic, Efficient",
+      "aesthetic": "Modern Medical",
+      "principles": [
+        "Clarity over decoration",
+        "Trust through consistency",
+        "Accessibility first (WCAG 2.2 AA)",
+        "Mobile-first hierarchy"
+      ]
+    },
+    "typography": {
+      "font_family": {
+        "headings": "Manrope, sans-serif",
+        "body": "Public Sans, sans-serif",
+        "mono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+      },
+      "scale": {
+        "h1": "text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight",
+        "h2": "text-3xl md:text-4xl font-semibold tracking-tight",
+        "h3": "text-2xl md:text-3xl font-semibold",
+        "body_large": "text-lg md:text-xl leading-relaxed",
+        "body_base": "text-base leading-relaxed",
+        "caption": "text-sm text-muted-foreground"
+      }
+    },
+    "colors": {
+      "palette": {
+        "primary": {
+          "name": "Medical Teal",
+          "hex": "#0F766E",
+          "hsl": "176 80% 28%",
+          "usage": "Primary buttons, active states, key brand elements"
+        },
+        "secondary": {
+          "name": "Trust Blue",
+          "hex": "#0EA5E9",
+          "hsl": "199 89% 48%",
+          "usage": "Secondary actions, links, illustrations"
+        },
+        "background": {
+          "name": "Clinical White",
+          "hex": "#F8FAFC",
+          "hsl": "210 40% 98%",
+          "usage": "Page background"
+        },
+        "foreground": {
+          "name": "Deep Navy",
+          "hex": "#0F172A",
+          "hsl": "222 47% 11%",
+          "usage": "Main text, headings"
+        },
+        "muted": {
+          "name": "Slate",
+          "hex": "#64748B",
+          "hsl": "215 16% 47%",
+          "usage": "Secondary text, borders, disabled states"
+        },
+        "accent": {
+          "name": "Soft Coral",
+          "hex": "#F43F5E",
+          "hsl": "350 80% 60%",
+          "usage": "Urgent notices, heart icons, warm highlights"
+        }
+      },
+      "css_variables": {
+        "--background": "210 40% 98%",
+        "--foreground": "222 47% 11%",
+        "--card": "0 0% 100%",
+        "--card-foreground": "222 47% 11%",
+        "--popover": "0 0% 100%",
+        "--popover-foreground": "222 47% 11%",
+        "--primary": "176 80% 28%",
+        "--primary-foreground": "0 0% 100%",
+        "--secondary": "199 89% 48%",
+        "--secondary-foreground": "0 0% 100%",
+        "--muted": "210 40% 96.1%",
+        "--muted-foreground": "215 16% 47%",
+        "--accent": "350 80% 60%",
+        "--accent-foreground": "0 0% 100%",
+        "--destructive": "0 84.2% 60.2%",
+        "--destructive-foreground": "0 0% 98%",
+        "--border": "214.3 31.8% 91.4%",
+        "--input": "214.3 31.8% 91.4%",
+        "--ring": "176 80% 28%",
+        "--radius": "0.5rem"
+      }
+    },
+    "spacing": {
+      "container": "container mx-auto px-4 md:px-6 lg:px-8",
+      "section_padding": "py-12 md:py-24 lg:py-32",
+      "element_gap": "gap-4 md:gap-8"
+    },
+    "visual_enhancers": {
+      "shadows": {
+        "card": "shadow-sm hover:shadow-md transition-shadow duration-200",
+        "floating": "shadow-lg shadow-primary/10"
+      },
+      "borders": {
+        "default": "border border-border",
+        "subtle": "border-b border-border/50"
+      },
+      "radius": {
+        "default": "rounded-lg",
+        "large": "rounded-xl",
+        "pill": "rounded-full"
+      }
+    }
+  },
+  "assets": {
+    "images": {
+      "hero_bg": {
+        "url": "https://images.unsplash.com/photo-1621953703922-8146d7127225?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "alt": "Modern, clean medical clinic corridor",
+        "usage": "Hero section background or side image"
+      },
+      "doctor_patient": {
+        "url": "https://images.unsplash.com/photo-1632053652571-a6a45052bbbd?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "alt": "Doctor consulting with patient",
+        "usage": "Services or About section"
+      },
+      "nurse_care": {
+        "url": "https://images.unsplash.com/photo-1631558554184-319c88f4f8a4?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "alt": "Nurse checking blood pressure",
+        "usage": "Preventive care section"
+      },
+      "abstract_tech": {
+        "url": "https://images.unsplash.com/photo-1711212119093-eff191c10f85?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "alt": "Abstract blue medical texture",
+        "usage": "Background patterns or card headers"
+      },
+      "logo": {
+        "url": "https://my-primarycare.com/images/support/Logo.jpg",
+        "alt": "Primary Care Services Logo",
+        "usage": "Header and Footer"
+      }
+    },
+    "icons": {
+      "library": "lucide-react",
+      "style": "Stroke width 1.5px, size 24px for standard, 48px for features"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8 rounded-md font-medium transition-colors",
+      "secondary": "bg-secondary text-secondary-foreground hover:bg-secondary/80 h-11 px-8 rounded-md font-medium transition-colors",
+      "outline": "border border-input bg-background hover:bg-accent hover:text-accent-foreground h-11 px-8 rounded-md font-medium transition-colors",
+      "ghost": "hover:bg-accent hover:text-accent-foreground h-10 px-4 rounded-md font-medium transition-colors"
+    },
+    "cards": {
+      "feature": "bg-card text-card-foreground rounded-xl border shadow-sm p-6 hover:shadow-md transition-all duration-200",
+      "profile": "overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm transition-all hover:shadow-md"
+    },
+    "inputs": {
+      "default": "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+    }
+  },
+  "layout_strategies": {
+    "hero": "Split layout: Left content (H1 + Sub + CTAs), Right image (Rounded/Masked). Mobile: Stacked.",
+    "grid_bento": "Grid with varying spans. Use col-span-2 for featured services. Gap-6 or Gap-8.",
+    "sidebar": "Sticky sidebar for provider filters or documentation navigation."
+  },
+  "instructions_to_main_agent": {
+    "step_1": "Update /app/frontend/src/index.css with the new CSS variables defined in 'colors.css_variables'.",
+    "step_2": "Ensure 'Manrope' and 'Public Sans' are correctly imported in index.css (already present, just verify usage).",
+    "step_3": "Refactor the Navbar to be sticky, glassmorphic (backdrop-blur-md bg-white/70), and contain the Logo, Nav Links, and a 'Patient Portal' button.",
+    "step_4": "Build the Hero section using the 'hero_bg' image and the primary color palette.",
+    "step_5": "Implement the 'Services' section using a Bento Grid layout with Lucide icons.",
+    "step_6": "Create the 'Providers' directory using the card component style defined above.",
+    "step_7": "Ensure all forms (Contact, Login) use Shadcn Form components with Zod validation.",
+    "step_8": "Add 'data-testid' to all interactive elements."
+  },
+  "universal_guidelines": [
+    "Do not use gradients for text.",
+    "Ensure 4.5:1 contrast ratio for all text.",
+    "Use 'lucide-react' for all icons.",
+    "Respect 'prefers-reduced-motion'.",
+    "Mobile-first: Always design for mobile width first, then add md: and lg: classes."
+  ]
+}
