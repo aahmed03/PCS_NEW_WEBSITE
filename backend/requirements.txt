@@ -1,29 +1,28 @@
-# --- Web API framework ---
+# Web API framework
 fastapi==0.110.1
+starlette==0.37.2
 
-# --- ASGI server + Azure startup ---
+# Servers
 uvicorn[standard]==0.30.6
 gunicorn==22.0.0
 
-# --- MongoDB (Async) ---
+# MongoDB (Async) - compatible pair
 motor==3.6.0
 pymongo==4.9.2
 
-# --- Config (.env) ---
+# Config (.env)
 python-dotenv==1.0.1
 
-# --- Auth / Security ---
+# Auth / Security
 PyJWT==2.10.1
 passlib[bcrypt]==1.7.4
 bcrypt==4.1.3
 email-validator==2.3.0
 
-# --- Form uploads (if used anywhere in the API) ---
+# Form uploads
 python-multipart==0.0.21
 
-# --- Outbound email (Resend) ---
+# Outbound email (Resend)
 resend==2.19.0
-
-# --- HTTP client (safe explicit dependency) ---
 requests==2.32.5
 
