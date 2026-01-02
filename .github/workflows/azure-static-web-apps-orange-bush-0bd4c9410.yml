@@ -2,21 +2,16 @@ name: Azure Static Web Apps CI/CD
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, closed]
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   build_and_deploy_job:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
     name: Build and Deploy Job
-    permissions:
-      contents: read
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,10 +22,25 @@ jobs:
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_ORANGE_BUSH_0BD4C9410 }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }} # enables PR comments/status
           action: "upload"
+          app_location: "frontend"
+          api_location: ""
+          output_location: "build"
 
-          app_location: "./frontend"
-          api_location: ""              # no SWA-managed API (your API is in App Service)
-          output_location: "build"      # CRA build output under frontend/build
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close Pull Request Job
+    steps:
+      - name: Close Pull Request
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_ORANGE_BUSH_0BD4C9410 }}
+          action: "close"
+          # These are added to satisfy validators / schema checks
+          app_location: "frontend"
+          api_location: ""
+          output_location: "build"
+
+
 
