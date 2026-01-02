@@ -135,8 +135,8 @@ export default function PCSForms() {
       ...Object.keys(groups).filter((k) => !Object.prototype.hasOwnProperty.call(categoryTitles, k)),
     ].filter((k) => groups[k]?.length);
 
-    return orderedKeys.map((k) => [k, groups[k]]);
-  }, [forms]);
+  return orderedKeys.map((k) => [k, groups[k]]);
+}, [forms, categoryTitles]);
 
   const getFileHref = (fileName) => `/forms/${encodeURIComponent(fileName)}`;
 
