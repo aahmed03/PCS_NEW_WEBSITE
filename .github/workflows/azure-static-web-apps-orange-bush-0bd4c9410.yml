@@ -14,43 +14,23 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
     name: Build and Deploy Job
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
-
-      # Ensure Node is a supported version (matches your engines >=18 <21)
-      - name: Set up Node
-        uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          submodules: true
+          lfs: false
 
-      # OPTIONAL but helpful: validate build before SWA deploy runs
-      - name: Install and Build (frontend)
-        working-directory: frontend
-        run: |
-          yarn --version
-          yarn install --frozen-lockfile
-          yarn build
-
-      - name: Deploy to Azure Static Web Apps
+      - name: Build and Deploy
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_ORANGE_BUSH_0BD4C9410 }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }} # enables PR comments/status
           action: "upload"
-          app_location: "frontend"
-          api_location: ""
-          output_location: "build"
 
-  close_pull_request_job:
-    if: github.event_name == 'pull_request' && github.event.action == 'closed'
-    runs-on: ubuntu-latest
-    name: Close Pull Request Job
-    steps:
-      - name: Close Pull Request
-        uses: Azure/static-web-apps-deploy@v1
-        with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_ORANGE_BUSH_0BD4C9410 }}
-          action: "close"
-          app_location: "frontend"
+          app_location: "./frontend"
+          api_location: ""              # no SWA-managed API (your API is in App Service)
+          output_location: "build"      # CRA build output under frontend/build
 
