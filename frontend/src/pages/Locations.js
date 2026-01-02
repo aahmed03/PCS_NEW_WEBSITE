@@ -1,5 +1,5 @@
 // Locations.js
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { motion } from "framer-motion";
 import { MapPin, Phone, Clock, Navigation, AlertTriangle } from "lucide-react";
@@ -54,7 +54,8 @@ export default function Locations() {
     []
   );
 
-  const buildAddressString = (location) => {
+  // ✅ Memoize helpers so useMemo dependencies are stable / lint-clean
+  const buildAddressString = useCallback((location) => {
     const address = String(location?.address ?? "").trim();
     const city = String(location?.city ?? "").trim();
     const state = String(location?.state ?? "").trim();
@@ -62,9 +63,9 @@ export default function Locations() {
     const line2 = [city, state, zip].filter(Boolean).join(" ").trim();
 
     return [address, line2].filter(Boolean).join(", ");
-  };
+  }, []);
 
-  const normalizePhoneDigits = (phone) => String(phone || "").replace(/\D/g, "");
+  const normalizePhoneDigits = useCallback((phone) => String(phone || "").replace(/\D/g, ""), []);
 
   /**
    * ✅ FIX for "Invalid 'pb' parameter"
@@ -74,22 +75,27 @@ export default function Locations() {
    *  - Otherwise build a safe embed URL using q=<address>&output=embed (no API key)
    *  - Never pass through broken pb strings
    */
-  const getSafeEmbedSrc = (location) => {
-    const lat = location?.latitude ?? location?.lat;
-    const lng = location?.longitude ?? location?.lng;
+  const getSafeEmbedSrc = useCallback(
+    (location) => {
+      const lat = location?.latitude ?? location?.lat;
+      const lng = location?.longitude ?? location?.lng;
 
-    const hasLat =
-      typeof lat === "number" || (typeof lat === "string" && lat.trim() !== "");
-    const hasLng =
-      typeof lng === "number" || (typeof lng === "string" && lng.trim() !== "");
+      const hasLat =
+        typeof lat === "number" || (typeof lat === "string" && lat.trim() !== "");
+      const hasLng =
+        typeof lng === "number" || (typeof lng === "string" && lng.trim() !== "");
 
-    if (hasLat && hasLng) {
-      return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}&output=embed`;
-    }
+      if (hasLat && hasLng) {
+        return `https://www.google.com/maps?q=${encodeURIComponent(
+          `${lat},${lng}`
+        )}&output=embed`;
+      }
 
-    const addressQuery = buildAddressString(location);
-    return `https://www.google.com/maps?q=${encodeURIComponent(addressQuery)}&output=embed`;
-  };
+      const addressQuery = buildAddressString(location);
+      return `https://www.google.com/maps?q=${encodeURIComponent(addressQuery)}&output=embed`;
+    },
+    [buildAddressString]
+  );
 
   const locationsView = useMemo(() => {
     const list = Array.isArray(locations) ? locations : [];
@@ -115,7 +121,7 @@ export default function Locations() {
         _hoursRows: hoursRows,
       };
     });
-  }, [locations, DAYS_ORDER]);
+  }, [locations, DAYS_ORDER, buildAddressString, normalizePhoneDigits, getSafeEmbedSrc]);
 
   const hasLocations = locationsView.length > 0;
 
@@ -188,7 +194,8 @@ export default function Locations() {
                 No locations found
               </h2>
               <p className="text-muted-foreground">
-                The locations list is empty. Try seeding the database or check the <code>/api/locations</code> endpoint.
+                The locations list is empty. Try seeding the database or check the{" "}
+                <code>/api/locations</code> endpoint.
               </p>
             </div>
           ) : (
@@ -294,9 +301,7 @@ export default function Locations() {
                                     <span className="text-muted-foreground font-medium">
                                       {row.day}
                                     </span>
-                                    <span className="text-muted-foreground">
-                                      {row.hours}
-                                    </span>
+                                    <span className="text-muted-foreground">{row.hours}</span>
                                   </div>
                                 ))}
                               </div>
