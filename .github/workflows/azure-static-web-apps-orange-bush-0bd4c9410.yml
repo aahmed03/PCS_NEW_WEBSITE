@@ -19,12 +19,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: false
-          lfs: false
 
       - name: Build and Deploy
-        id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PCS_WEB_DEV }}
@@ -35,7 +31,6 @@ jobs:
           api_location: ""
           output_location: "build"
 
-          # Explicit build for CRA + CRACO (yarn)
           app_build_command: "yarn install --frozen-lockfile && yarn build"
 
   close_pull_request_job:
@@ -47,11 +42,11 @@ jobs:
 
     steps:
       - name: Close Pull Request
-        id: closepullrequest
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PCS_WEB_DEV }}
           action: "close"
+
 
 
 
