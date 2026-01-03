@@ -1,130 +1,48 @@
 import axios from "axios";
 
 /**
- * Normalize a URL-like value into an absolute URL (http/https) where possible.
- * Examples:
- *  - "127.0.0.1:8000"        -> "http://127.0.0.1:8000"
- *  - "http://127.0.0.1:8000" -> unchanged
- *  - "https://api.site.com"  -> unchanged
+ * Option A (recommended): SWA proxies `/api/*` to your backend.
+ *
+ * ✅ Local dev/laptop:
+ *   - Frontend runs on localhost
+ *   - Backend runs on http://127.0.0.1:8000
+ *   - API base => http://127.0.0.1:8000/api
+ *
+ * ✅ Azure (Stage/Prod):
+ *   - Frontend hosted on Azure Static Web Apps
+ *   - SWA routes proxy `/api/*` to your backend (per staticwebapp.config.json)
+ *   - API base => /api  (same-origin)
+ *
+ * NOTE: With SWA proxy, you do NOT need REACT_APP_API_URL_* in the frontend.
+ *       Those env vars are only needed if you want to bypass proxy (Option B).
  */
-function normalizeBaseUrl(raw) {
-  if (!raw) return "";
-  const trimmed = String(raw).trim();
-  if (!trimmed) return "";
-
-  // already absolute
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-
-  // host[:port][/path] without protocol
-  if (/^[\w.-]+(:\d+)?(\/.*)?$/i.test(trimmed)) {
-    const host = trimmed.split("/")[0].toLowerCase();
-    const isLocalHost =
-      host.startsWith("localhost") ||
-      host.startsWith("127.0.0.1") ||
-      host.startsWith("0.0.0.0");
-
-    // local -> http, otherwise https
-    return `${isLocalHost ? "http" : "https"}://${trimmed}`;
-  }
-
-  return trimmed;
-}
 
 function stripTrailingSlash(url) {
   return String(url || "").replace(/\/+$/, "");
 }
 
-function stripTrailingApi(url) {
-  const cleaned = stripTrailingSlash(url);
-  return cleaned.replace(/\/api$/i, "");
+function getHostname() {
+  return (window?.location?.hostname || "").toLowerCase();
 }
 
-function ensureApiSuffix(url) {
-  const base = stripTrailingSlash(url);
-  return /\/api$/i.test(base) ? base : `${base}/api`;
-}
-
-/**
- * Normalize deploy env names to your 3 supported values:
- * - dev
- * - stage
- * - production
- */
-function normalizeDeployEnv(raw) {
-  const v = String(raw || "").trim().toLowerCase();
-  if (!v) return "";
-
-  if (v === "prod" || v === "production") return "production";
-  if (v === "stage" || v === "staging") return "stage";
-  if (v === "dev" || v === "local" || v === "laptop") return "dev";
-
-  // allow exact values too (but if unknown, return as-is)
-  return v;
+function isLocalHost(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0";
 }
 
 /**
- * Get deploy environment.
- * You requested:
- * - Local dev/laptop -> "dev"
- * - Azure dev       -> "stage"
- * - Azure prod      -> "production"
- *
- * Priority:
- * 1) runtime injection (optional): window.__ENV__.DEPLOY_ENV
- * 2) build-time: REACT_APP_DEPLOY_ENV
- * 3) heuristic: localhost -> dev
- * 4) default -> production
- */
-function getDeployEnv() {
-  const runtimeEnv = window?.__ENV__?.DEPLOY_ENV;
-  const runtimeNorm = normalizeDeployEnv(runtimeEnv);
-  if (runtimeNorm) return runtimeNorm;
-
-  const buildEnv = process.env.REACT_APP_DEPLOY_ENV;
-  const buildNorm = normalizeDeployEnv(buildEnv);
-  if (buildNorm) return buildNorm;
-
-  const hostname = window?.location?.hostname || "";
-  const isLocal = hostname === "localhost" || hostname === "127.0.0.1";
-  if (isLocal) return "dev";
-
-  return "production";
-}
-
-/**
- * Resolve API base URL.
- *
- * Priority:
- * 1) REACT_APP_API_BASE_URL -> explicit override (best practice)
- * 2) Deploy env mapping:
- *    - REACT_APP_API_URL_DEV
- *    - REACT_APP_API_URL_STAGE
- *    - REACT_APP_API_URL_PROD
- * 3) Dev fallback: http://127.0.0.1:8000/api
- * 4) Last resort: same-origin /api  (ONLY if you configured SWA proxy routes)
+ * Resolve API base URL for Option A:
+ * - Local: direct to backend (127.0.0.1:8000/api)
+ * - Azure: use same-origin /api (SWA proxy)
  */
 function resolveApiBaseUrl() {
-  // 1) explicit override
-  const apiBaseOverride = normalizeBaseUrl(process.env.REACT_APP_API_BASE_URL);
-  if (apiBaseOverride) {
-    return ensureApiSuffix(stripTrailingApi(apiBaseOverride));
+  const hostname = getHostname();
+
+  // Local dev: call local backend directly
+  if (isLocalHost(hostname)) {
+    return "http://127.0.0.1:8000/api";
   }
 
-  const env = getDeployEnv();
-
-  // 2) env-specific targets
-  const devUrl = normalizeBaseUrl(process.env.REACT_APP_API_URL_DEV);
-  const stageUrl = normalizeBaseUrl(process.env.REACT_APP_API_URL_STAGE);
-  const prodUrl = normalizeBaseUrl(process.env.REACT_APP_API_URL_PROD);
-
-  if (env === "dev" && devUrl) return ensureApiSuffix(stripTrailingApi(devUrl));
-  if (env === "stage" && stageUrl) return ensureApiSuffix(stripTrailingApi(stageUrl));
-  if (env === "production" && prodUrl) return ensureApiSuffix(stripTrailingApi(prodUrl));
-
-  // 3) dev fallback
-  if (env === "dev") return "http://127.0.0.1:8000/api";
-
-  // 4) last resort: same-origin /api
+  // Azure SWA: proxy /api/* using staticwebapp.config.json routes
   return `${stripTrailingSlash(window.location.origin)}/api`;
 }
 
@@ -136,20 +54,14 @@ export const api = axios.create({
   withCredentials: false,
 });
 
-// Helpful log (doesn't print secrets)
+// Helpful log (no secrets)
 if (process.env.NODE_ENV !== "production") {
   // eslint-disable-next-line no-console
-  console.log("[api] deployEnv =", getDeployEnv());
+  console.log("[api] hostname =", getHostname());
   // eslint-disable-next-line no-console
-  console.log("[api] baseURL   =", API_BASE);
+  console.log("[api] baseURL  =", API_BASE);
   // eslint-disable-next-line no-console
-  console.log("[api] env vars present:", {
-    REACT_APP_DEPLOY_ENV: !!process.env.REACT_APP_DEPLOY_ENV,
-    REACT_APP_API_BASE_URL: !!process.env.REACT_APP_API_BASE_URL,
-    REACT_APP_API_URL_DEV: !!process.env.REACT_APP_API_URL_DEV,
-    REACT_APP_API_URL_STAGE: !!process.env.REACT_APP_API_URL_STAGE,
-    REACT_APP_API_URL_PROD: !!process.env.REACT_APP_API_URL_PROD,
-  });
+  console.log("[api] mode     =", isLocalHost(getHostname()) ? "local-direct" : "swa-proxy");
 }
 
 api.interceptors.request.use((config) => {
@@ -188,6 +100,7 @@ api.interceptors.response.use(
 
 /**
  * API helpers
+ * (These become: /api/providers, /api/services, /api/locations, etc.)
  */
 export const providersApi = {
   getAll: () => api.get("/providers"),
@@ -214,6 +127,7 @@ export const contactApi = {
 export const resourcesApi = {
   getAll: () => api.get("/resources"),
 };
+
 
 
 
