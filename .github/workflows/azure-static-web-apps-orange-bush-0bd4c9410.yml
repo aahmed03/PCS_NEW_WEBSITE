@@ -2,22 +2,31 @@ name: Azure Static Web Apps CI/CD - pcs-web-dev
 
 on:
   push:
-    branches: [ "main" ]
-  workflow_dispatch:
+    branches: [ main ]
+  pull_request:
+    types: [ opened, synchronize, reopened, closed ]
+    branches: [ main ]
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   build_and_deploy_job:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      # Optional sanity check: confirms the secret exists (won’t print token)
-      - name: Verify token is present
+      # Optional sanity check (won't print secret)
+      - name: Verify SWA token is present
         shell: bash
+        env:
+          SWA_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PCS_WEB_DEV }}
         run: |
-          if [ -z "${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PCS_WEB_DEV }}" ]; then
-            echo "❌ SWA token secret is EMPTY or not available to this run."
+          if [ -z "$SWA_TOKEN" ]; then
+            echo "❌ Missing AZURE_STATIC_WEB_APPS_API_TOKEN_PCS_WEB_DEV secret"
             exit 1
           fi
           echo "✅ SWA token secret is present."
@@ -27,10 +36,30 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PCS_WEB_DEV }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          action: "upload"
-          app_location: "frontend"
+          action: upload
+
+          # Your React app lives here
+          app_location: frontend
+
+          # No SWA Functions API in this repo
           api_location: ""
-          output_location: "build"
+
+          # CRA/CRACO build output folder (relative to app_location)
+          output_location: build
+
+          # Force build command (removes any Oryx guesswork)
+          app_build_command: npm run build
+
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Close Pull Request
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PCS_WEB_DEV }}
+          action: close
 
 
 
