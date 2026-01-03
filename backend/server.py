@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -27,6 +27,7 @@ ENV_FILE = ROOT_DIR / ".env"
 if ENV_FILE.exists():
     load_dotenv(ENV_FILE)
 
+
 # =========================================================
 # Logging
 # =========================================================
@@ -37,7 +38,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pcs-api")
 
-# Silence very noisy Azure SDK HTTP logging (causes slowness)
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 logging.getLogger("azure.monitor.opentelemetry.exporter").setLevel(logging.WARNING)
 logging.getLogger("azure.core").setLevel(logging.WARNING)
@@ -71,14 +71,13 @@ app = FastAPI(title="Primary Care Services API")
 api_router = APIRouter(prefix="/api")
 
 
-# IMPORTANT for Azure: fast root path (no auth, no db)
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "pcs-api"}
 
 
 # =========================================================
-# Mongo (lazy init on startup)
+# Mongo (init on startup)
 # =========================================================
 MONGO_URL = require_env("MONGO_URL")
 DB_NAME = require_env("DB_NAME")
@@ -87,7 +86,6 @@ MONGO_TIMEOUT_MS = int(get_env("MONGO_TIMEOUT_MS", "5000"))
 
 @app.on_event("startup")
 async def startup_mongo():
-    # Create client on startup (per worker)
     app.state.mongo_client = AsyncIOMotorClient(
         MONGO_URL,
         serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
@@ -97,12 +95,11 @@ async def startup_mongo():
     )
     app.state.db = app.state.mongo_client[DB_NAME]
 
-    # Quick ping so we know immediately if connectivity is broken
     try:
         await app.state.db.command("ping")
         logger.info("Mongo initialized. DB=%s | timeout_ms=%s", DB_NAME, MONGO_TIMEOUT_MS)
     except Exception as e:
-        # Don't crash the app; health will show db_ok=false
+        # Don't crash app; /api/health will show db_ok=false
         logger.error("Mongo ping failed on startup: %s", str(e))
 
 
@@ -202,34 +199,7 @@ class ContactFormResponse(BaseModel):
 
 
 # =========================================================
-# API Routes
-# =========================================================
-@api_router.get("/")
-async def api_root():
-    return {"message": "Primary Care Services API"}
-
-
-@api_router.get("/health")
-async def health(request: Request):
-    db_ok = False
-    try:
-        db = get_db(request)
-        await db.command("ping")
-        db_ok = True
-    except Exception as e:
-        logger.warning("DB ping failed: %s", str(e))
-
-    return {
-        "status": "ok",
-        "time": datetime.now(timezone.utc).isoformat(),
-        "env": get_env("ENV", "unknown"),
-        "db_ok": db_ok,
-        "email_enabled": EMAIL_ENABLED,
-    }
-
-
-# =========================================================
-# ✅ Content endpoints used by the frontend
+# Helpers: DB queries
 # =========================================================
 async def _find_many(
     db,
@@ -241,12 +211,43 @@ async def _find_many(
     try:
         docs = await db[collection].find(q).to_list(length=limit)
     except Exception as e:
-        logger.error("Query failed for collection '%s': %s", collection, str(e))
-        return []
+        logger.exception("Query failed for collection '%s'", collection)
+        # Return 500 so frontend can show real error instead of silently empty lists
+        raise HTTPException(status_code=500, detail=f"DB query failed for {collection}: {str(e)}")
 
     for d in docs:
-        d.pop("_id", None)  # remove Mongo ObjectId for JSON safety
+        d.pop("_id", None)
     return docs
+
+
+# =========================================================
+# API Routes
+# =========================================================
+@api_router.get("/")
+async def api_root():
+    return {"message": "Primary Care Services API"}
+
+
+@api_router.get("/health")
+async def health(request: Request):
+    db_ok = False
+    error = None
+    try:
+        db = get_db(request)
+        await db.command("ping")
+        db_ok = True
+    except Exception as e:
+        error = str(e)
+        logger.warning("DB ping failed: %s", error)
+
+    return {
+        "status": "ok",
+        "time": datetime.now(timezone.utc).isoformat(),
+        "env": get_env("ENV", "unknown"),
+        "db_ok": db_ok,
+        "db_error": error,
+        "email_enabled": EMAIL_ENABLED,
+    }
 
 
 @api_router.get("/providers")
@@ -265,6 +266,13 @@ async def get_services(request: Request):
 async def get_locations(request: Request):
     db = get_db(request)
     return await _find_many(db, "locations")
+
+
+# Your frontend calls /resources too
+@api_router.get("/resources")
+async def get_resources(request: Request):
+    db = get_db(request)
+    return await _find_many(db, "resources")
 
 
 @api_router.post("/contact", response_model=ContactFormResponse)
@@ -313,8 +321,15 @@ async def submit_contact_form(form_data: ContactFormSubmit, request: Request):
     )
 
 
-# ✅ Make sure this is AFTER all @api_router.get/post declarations
+# Explicit OPTIONS handler (helps preflight in some edge cases)
+@api_router.options("/{path:path}")
+async def preflight_handler(path: str):
+    return Response(status_code=204)
+
+
+# Include router AFTER routes are declared
 app.include_router(api_router)
+
 
 # =========================================================
 # CORS
@@ -329,15 +344,22 @@ def parse_cors_origins(value: str) -> List[str]:
 
 
 cors_origins = parse_cors_origins(get_env("CORS_ORIGINS", "*"))
+
+# IMPORTANT RULE:
+# allow_credentials=True cannot be used with allow_origins=["*"]
 allow_all = (len(cors_origins) == 1 and cors_origins[0] == "*")
+allow_credentials = False if allow_all else True
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=False if allow_all else True,
     allow_origins=cors_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
+    expose_headers=["Content-Type"],
+    max_age=86400,
 )
+
 
 
 
