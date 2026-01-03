@@ -11,7 +11,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, EmailStr, ConfigDict, Field
+from pydantic import BaseModel, EmailStr, Field
 
 import jwt
 from jwt import ExpiredSignatureError, InvalidTokenError
@@ -185,7 +185,7 @@ else:
 
 
 # =========================================================
-# Models (minimal set shown; add others as needed)
+# Models
 # =========================================================
 class ContactFormSubmit(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
@@ -228,6 +228,45 @@ async def health(request: Request):
     }
 
 
+# =========================================================
+# ✅ Content endpoints used by the frontend
+# =========================================================
+async def _find_many(
+    db,
+    collection: str,
+    query: Optional[Dict[str, Any]] = None,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    q = query or {}
+    try:
+        docs = await db[collection].find(q).to_list(length=limit)
+    except Exception as e:
+        logger.error("Query failed for collection '%s': %s", collection, str(e))
+        return []
+
+    for d in docs:
+        d.pop("_id", None)  # remove Mongo ObjectId for JSON safety
+    return docs
+
+
+@api_router.get("/providers")
+async def get_providers(request: Request):
+    db = get_db(request)
+    return await _find_many(db, "providers")
+
+
+@api_router.get("/services")
+async def get_services(request: Request):
+    db = get_db(request)
+    return await _find_many(db, "services")
+
+
+@api_router.get("/locations")
+async def get_locations(request: Request):
+    db = get_db(request)
+    return await _find_many(db, "locations")
+
+
 @api_router.post("/contact", response_model=ContactFormResponse)
 async def submit_contact_form(form_data: ContactFormSubmit, request: Request):
     db = get_db(request)
@@ -261,7 +300,6 @@ async def submit_contact_form(form_data: ContactFormSubmit, request: Request):
         }
 
         try:
-            # keep the event loop responsive
             await asyncio.to_thread(resend.Emails.send, params)
             email_status = "sent"
         except Exception as e:
@@ -275,6 +313,7 @@ async def submit_contact_form(form_data: ContactFormSubmit, request: Request):
     )
 
 
+# ✅ Make sure this is AFTER all @api_router.get/post declarations
 app.include_router(api_router)
 
 # =========================================================
@@ -299,6 +338,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 
