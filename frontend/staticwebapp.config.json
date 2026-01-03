@@ -1,21 +1,19 @@
 {
-  "routes": [
-    {
-      "route": "/api/*",
-      "allowedRoles": ["anonymous"],
-      "rewrite": "https://pcs-api-dev-fdacbseyd9audvfg.centralus-01.azurewebsites.net/api/*"
-    }
-  ],
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [
       "/api/*",
-      "/.auth/*",
-      "/images/*",
-      "/css/*",
-      "/*.{css,js,map,ico,png,jpg,jpeg,gif,svg,webp}"
+      "/assets/*",
+      "/static/*",
+      "/*.{css,js,map,ico,png,jpg,jpeg,gif,svg,webp,txt,xml,json}"
     ]
   },
+  "routes": [
+    {
+      "route": "/api/*",
+      "rewrite": "https://pcs-api-dev-fdacbseyd9audvfg.centralus-01.azurewebsites.net/api/*"
+    }
+  ],
   "globalHeaders": {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -23,3 +21,4 @@
     "Permissions-Policy": "geolocation=()"
   }
 }
+
