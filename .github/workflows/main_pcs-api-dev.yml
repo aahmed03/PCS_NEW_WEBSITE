@@ -16,9 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ❌ REMOVE Python setup + pip install
-      # Azure (Oryx) will handle this
-
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -32,6 +29,23 @@ jobs:
           app-name: pcs-api-dev
           slot-name: Production
           package: .
+
+      # ✅ Optional: verify API is up after deploy
+      - name: Smoke test /api/health
+        run: |
+          set -e
+          URL="https://pcs-api-dev-fdacbseyd9audvfg.centralus-01.azurewebsites.net/api/health"
+          echo "Checking $URL"
+          for i in {1..10}; do
+            if curl -fsS "$URL" | grep -q '"status":"ok"'; then
+              echo "✅ API healthy"
+              exit 0
+            fi
+            echo "Waiting for API to start... ($i/10)"
+            sleep 5
+          done
+          echo "❌ API health check failed"
+          exit 1
 
 
 

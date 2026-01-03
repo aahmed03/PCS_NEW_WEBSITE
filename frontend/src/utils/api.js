@@ -17,12 +17,13 @@ function normalizeBaseUrl(raw) {
 
   // host[:port][/path] without protocol
   if (/^[\w.-]+(:\d+)?(\/.*)?$/i.test(trimmed)) {
-    // default to https for non-local hostnames, otherwise http
-    const host = trimmed.split("/")[0];
+    const host = trimmed.split("/")[0].toLowerCase();
     const isLocalHost =
       host.startsWith("localhost") ||
       host.startsWith("127.0.0.1") ||
       host.startsWith("0.0.0.0");
+
+    // local -> http, otherwise https
     return `${isLocalHost ? "http" : "https"}://${trimmed}`;
   }
 
@@ -44,6 +45,24 @@ function ensureApiSuffix(url) {
 }
 
 /**
+ * Normalize deploy env names to your 3 supported values:
+ * - dev
+ * - stage
+ * - production
+ */
+function normalizeDeployEnv(raw) {
+  const v = String(raw || "").trim().toLowerCase();
+  if (!v) return "";
+
+  if (v === "prod" || v === "production") return "production";
+  if (v === "stage" || v === "staging") return "stage";
+  if (v === "dev" || v === "local" || v === "laptop") return "dev";
+
+  // allow exact values too (but if unknown, return as-is)
+  return v;
+}
+
+/**
  * Get deploy environment.
  * You requested:
  * - Local dev/laptop -> "dev"
@@ -57,12 +76,13 @@ function ensureApiSuffix(url) {
  * 4) default -> production
  */
 function getDeployEnv() {
-  // Optional runtime injection support (future-proof)
   const runtimeEnv = window?.__ENV__?.DEPLOY_ENV;
-  if (runtimeEnv) return String(runtimeEnv).trim().toLowerCase();
+  const runtimeNorm = normalizeDeployEnv(runtimeEnv);
+  if (runtimeNorm) return runtimeNorm;
 
   const buildEnv = process.env.REACT_APP_DEPLOY_ENV;
-  if (buildEnv) return String(buildEnv).trim().toLowerCase();
+  const buildNorm = normalizeDeployEnv(buildEnv);
+  if (buildNorm) return buildNorm;
 
   const hostname = window?.location?.hostname || "";
   const isLocal = hostname === "localhost" || hostname === "127.0.0.1";
@@ -74,21 +94,20 @@ function getDeployEnv() {
 /**
  * Resolve API base URL.
  *
- * Priority order:
- * 1) REACT_APP_API_BASE_URL -> explicit full base or backend base (we normalize + ensure /api)
- * 2) Environment-specific URL based on deploy env:
+ * Priority:
+ * 1) REACT_APP_API_BASE_URL -> explicit override (best practice)
+ * 2) Deploy env mapping:
  *    - REACT_APP_API_URL_DEV
  *    - REACT_APP_API_URL_STAGE
  *    - REACT_APP_API_URL_PROD
  * 3) Dev fallback: http://127.0.0.1:8000/api
- * 4) Last resort: same-origin /api  (ONLY useful if you have SWA route proxy configured)
+ * 4) Last resort: same-origin /api  (ONLY if you configured SWA proxy routes)
  */
 function resolveApiBaseUrl() {
-  // 1) explicit override (best practice)
+  // 1) explicit override
   const apiBaseOverride = normalizeBaseUrl(process.env.REACT_APP_API_BASE_URL);
   if (apiBaseOverride) {
-    // If they gave ".../api" keep it, else add it.
-    return ensureApiSuffix(apiBaseOverride);
+    return ensureApiSuffix(stripTrailingApi(apiBaseOverride));
   }
 
   const env = getDeployEnv();
@@ -103,11 +122,9 @@ function resolveApiBaseUrl() {
   if (env === "production" && prodUrl) return ensureApiSuffix(stripTrailingApi(prodUrl));
 
   // 3) dev fallback
-  if (env === "dev") {
-    return "http://127.0.0.1:8000/api";
-  }
+  if (env === "dev") return "http://127.0.0.1:8000/api";
 
-  // 4) last resort: same-origin /api (requires SWA proxy/route to backend)
+  // 4) last resort: same-origin /api
   return `${stripTrailingSlash(window.location.origin)}/api`;
 }
 
@@ -119,10 +136,20 @@ export const api = axios.create({
   withCredentials: false,
 });
 
-// Log once to help confirm which env/url is being used
+// Helpful log (doesn't print secrets)
 if (process.env.NODE_ENV !== "production") {
   // eslint-disable-next-line no-console
-  console.log("[api] deployEnv =", getDeployEnv(), "| baseURL =", API_BASE);
+  console.log("[api] deployEnv =", getDeployEnv());
+  // eslint-disable-next-line no-console
+  console.log("[api] baseURL   =", API_BASE);
+  // eslint-disable-next-line no-console
+  console.log("[api] env vars present:", {
+    REACT_APP_DEPLOY_ENV: !!process.env.REACT_APP_DEPLOY_ENV,
+    REACT_APP_API_BASE_URL: !!process.env.REACT_APP_API_BASE_URL,
+    REACT_APP_API_URL_DEV: !!process.env.REACT_APP_API_URL_DEV,
+    REACT_APP_API_URL_STAGE: !!process.env.REACT_APP_API_URL_STAGE,
+    REACT_APP_API_URL_PROD: !!process.env.REACT_APP_API_URL_PROD,
+  });
 }
 
 api.interceptors.request.use((config) => {
@@ -187,6 +214,7 @@ export const contactApi = {
 export const resourcesApi = {
   getAll: () => api.get("/resources"),
 };
+
 
 
 
