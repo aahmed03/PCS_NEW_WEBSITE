@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import '@/App.css';
 
@@ -22,6 +22,31 @@ import Insurance from '@/pages/Insurance';
 import FAQ from '@/pages/FAQ';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { Toaster } from 'sonner';
+
+/**
+ * Scroll to top on route change so navigation from footer doesn't keep you
+ * "stuck" at the bottom of the page.
+ */
+function ScrollToTop() {
+  const { pathname, hash } = useLocation();
+
+  React.useEffect(() => {
+    // If navigating to an anchor on the same/new page, try to scroll to it.
+    if (hash) {
+      const id = hash.replace('#', '');
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+    }
+
+    // Default: scroll to top on every route change.
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [pathname, hash]);
+
+  return null;
+}
 
 /**
  * Simple Error Boundary so a runtime error in any page doesn't blank the UI silently.
@@ -84,6 +109,9 @@ function App() {
       <AuthProvider>
         <AppErrorBoundary>
           <BrowserRouter basename={basename}>
+            {/* Fix: ensure we scroll to top on navigation */}
+            <ScrollToTop />
+
             <Toaster position="top-center" richColors />
             <Routes>
               <Route path="/" element={<Layout />}>
@@ -113,4 +141,5 @@ function App() {
 }
 
 export default App;
+
 
