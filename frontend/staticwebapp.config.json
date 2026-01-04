@@ -8,12 +8,28 @@
       "/*.{css,js,map,ico,png,jpg,jpeg,gif,svg,webp,txt,xml,json}"
     ]
   },
+  "routes": [
+    {
+      "route": "/api/*",
+      "allowedRoles": ["anonymous"],
+      "rewrite": "/api/*"
+    }
+  ],
+  "platform": {
+    "apiRuntime": "node:18"
+  },
   "globalHeaders": {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
     "Permissions-Policy": "geolocation=()"
+  },
+  "responseOverrides": {
+    "404": {
+      "rewrite": "/index.html"
+    }
   }
 }
+
 
 
