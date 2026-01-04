@@ -6,6 +6,7 @@
 # - Avoids quoting issues by writing temp start scripts
 # - Keeps env vars for backend process (Process scope)
 # - Adds clear diagnostics if something fails
+# - Adds clear diagnostics if something fails
 
 $ErrorActionPreference = "Stop"
 
