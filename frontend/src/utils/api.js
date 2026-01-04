@@ -1,49 +1,54 @@
 import axios from "axios";
 
-/**
- * Option A (recommended): SWA proxies `/api/*` to your backend.
- *
- * ✅ Local dev/laptop:
- *   - Frontend runs on localhost
- *   - Backend runs on http://127.0.0.1:8000
- *   - API base => http://127.0.0.1:8000/api
- *
- * ✅ Azure (Stage/Prod):
- *   - Frontend hosted on Azure Static Web Apps
- *   - SWA routes proxy `/api/*` to your backend (per staticwebapp.config.json)
- *   - API base => /api  (same-origin)
- *
- * NOTE: With SWA proxy, you do NOT need REACT_APP_API_URL_* in the frontend.
- *       Those env vars are only needed if you want to bypass proxy (Option B).
- */
-
 function stripTrailingSlash(url) {
   return String(url || "").replace(/\/+$/, "");
 }
 
-function getHostname() {
-  return (window?.location?.hostname || "").toLowerCase();
+function ensureApiSuffix(url) {
+  const base = stripTrailingSlash(url);
+  return /\/api$/i.test(base) ? base : `${base}/api`;
 }
 
 function isLocalHost(hostname) {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0";
+  return hostname === "localhost" || hostname === "127.0.0.1";
 }
 
 /**
- * Resolve API base URL for Option A:
- * - Local: direct to backend (127.0.0.1:8000/api)
- * - Azure: use same-origin /api (SWA proxy)
+ * Resolve API base URL WITHOUT relying on GitHub Action env vars.
+ *
+ * Rules:
+ * - Local dev/laptop => http://127.0.0.1:8000/api
+ * - Azure SWA (stage) => pcs-api-dev.../api   (your current dev API)
+ * - Azure prod => use REACT_APP_API_URL_PROD if provided, else fall back to stage URL
+ *
+ * Optional override:
+ * - REACT_APP_API_BASE_URL can still override everything if present (local builds)
  */
 function resolveApiBaseUrl() {
-  const hostname = getHostname();
+  const hostname = window?.location?.hostname || "";
 
-  // Local dev: call local backend directly
+  // Optional build-time override (local builds / future)
+  const override = process.env.REACT_APP_API_BASE_URL;
+  if (override && override.trim()) {
+    return ensureApiSuffix(override.trim());
+  }
+
+  // Local dev
   if (isLocalHost(hostname)) {
     return "http://127.0.0.1:8000/api";
   }
 
-  // Azure SWA: proxy /api/* using staticwebapp.config.json routes
-  return `${stripTrailingSlash(window.location.origin)}/api`;
+  // If running on Azure Static Web Apps (stage/dev), call the API directly
+  // (THIS is your current setup)
+  const stageApi = "https://pcs-api-dev-fdacbseyd9audvfg.centralus-01.azurewebsites.net";
+  const prodApi = process.env.REACT_APP_API_URL_PROD; // optional for later
+
+  // If you later deploy a prod API, set REACT_APP_API_URL_PROD in the build pipeline.
+  if (prodApi && prodApi.trim()) {
+    return ensureApiSuffix(prodApi.trim());
+  }
+
+  return ensureApiSuffix(stageApi);
 }
 
 const API_BASE = resolveApiBaseUrl();
@@ -54,23 +59,12 @@ export const api = axios.create({
   withCredentials: false,
 });
 
-// Helpful log (no secrets)
 if (process.env.NODE_ENV !== "production") {
   // eslint-disable-next-line no-console
-  console.log("[api] hostname =", getHostname());
-  // eslint-disable-next-line no-console
-  console.log("[api] baseURL  =", API_BASE);
-  // eslint-disable-next-line no-console
-  console.log("[api] mode     =", isLocalHost(getHostname()) ? "local-direct" : "swa-proxy");
+  console.log("[api] baseURL =", API_BASE);
 }
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) {
-    config.headers = config.headers || {};
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-
   config.headers = config.headers || {};
   config.headers["X-Requested-With"] = "XMLHttpRequest";
   return config;
@@ -79,29 +73,18 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    const status = err?.response?.status;
-    const method = err?.config?.method?.toUpperCase?.() || "";
-    const url = err?.config?.url || "";
-    const baseURL = err?.config?.baseURL || API_BASE;
-
     // eslint-disable-next-line no-console
-    console.error("[api] error:", {
-      status,
-      method,
-      url,
-      baseURL,
-      message: err?.message,
+    console.error("[api] error", {
+      baseURL: err?.config?.baseURL,
+      url: err?.config?.url,
+      status: err?.response?.status,
       data: err?.response?.data,
+      message: err?.message,
     });
-
     return Promise.reject(err);
   }
 );
 
-/**
- * API helpers
- * (These become: /api/providers, /api/services, /api/locations, etc.)
- */
 export const providersApi = {
   getAll: () => api.get("/providers"),
   getById: (id) => api.get(`/providers/${encodeURIComponent(id)}`),
