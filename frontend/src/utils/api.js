@@ -13,42 +13,67 @@ function isLocalHost(hostname) {
   return hostname === "localhost" || hostname === "127.0.0.1";
 }
 
+function hostEndsWith(hostname, suffix) {
+  return String(hostname || "").toLowerCase().endsWith(String(suffix || "").toLowerCase());
+}
+
+function hostEquals(hostname, exact) {
+  return String(hostname || "").toLowerCase() === String(exact || "").toLowerCase();
+}
+
 /**
- * Resolve API base URL WITHOUT relying on GitHub Action env vars.
+ * Resolve API base URL.
  *
- * Rules:
- * - Local dev/laptop => http://127.0.0.1:8000/api
- * - Azure SWA (stage) => pcs-api-dev.../api   (your current dev API)
- * - Azure prod => use REACT_APP_API_URL_PROD if provided, else fall back to stage URL
+ * Priority:
+ * 1) REACT_APP_API_BASE_URL override (explicit)
+ * 2) Localhost -> http://127.0.0.1:8000/api
+ * 3) If running on PROD Static Web App host -> PROD API
+ * 4) Otherwise (SWA staging/preview) -> DEV API
  *
- * Optional override:
- * - REACT_APP_API_BASE_URL can still override everything if present (local builds)
+ * Optional:
+ * - REACT_APP_API_URL_PROD can override the PROD API host in CI/build
  */
 function resolveApiBaseUrl() {
   const hostname = window?.location?.hostname || "";
 
-  // Optional build-time override (local builds / future)
+  // 1) Explicit override (useful for local builds or controlled CI)
   const override = process.env.REACT_APP_API_BASE_URL;
   if (override && override.trim()) {
     return ensureApiSuffix(override.trim());
   }
 
-  // Local dev
+  // 2) Local dev
   if (isLocalHost(hostname)) {
     return "http://127.0.0.1:8000/api";
   }
 
-  // If running on Azure Static Web Apps (stage/dev), call the API directly
-  // (THIS is your current setup)
-  const stageApi = "https://pcs-api-dev-fdacbseyd9audvfg.centralus-01.azurewebsites.net";
-  const prodApi = process.env.REACT_APP_API_URL_PROD; // optional for later
+  // Known API endpoints
+  const devApiHost = "https://pcs-api-dev-fdacbseyd9audvfg.centralus-01.azurewebsites.net";
+  const prodApiHostDefault =
+    "https://pcs-api-prod-d7bdb9bfbta5d5b2.centralus-01.azurewebsites.net";
 
-  // If you later deploy a prod API, set REACT_APP_API_URL_PROD in the build pipeline.
-  if (prodApi && prodApi.trim()) {
-    return ensureApiSuffix(prodApi.trim());
+  // Optional: allow CI/build to supply a different prod API host
+  const prodApiFromEnv = process.env.REACT_APP_API_URL_PROD;
+  const prodApiHost = (prodApiFromEnv && prodApiFromEnv.trim())
+    ? prodApiFromEnv.trim()
+    : prodApiHostDefault;
+
+  // 3) Detect PROD Static Web App host and route to PROD API
+  // Your current prod SWA URL:
+  const prodSwaHostExact = "ashy-smoke-0f1273010.2.azurestaticapps.net";
+
+  // Also treat any custom domain you later add as PROD by suffix match (optional)
+  // Example: if you later use www.my-primarycare.com or my-primarycare.com
+  // add those here if needed.
+  const isProdFrontend =
+    hostEquals(hostname, prodSwaHostExact);
+
+  if (isProdFrontend) {
+    return ensureApiSuffix(prodApiHost);
   }
 
-  return ensureApiSuffix(stageApi);
+  // 4) For all other non-local hosts (SWA preview/stage), default to DEV API
+  return ensureApiSuffix(devApiHost);
 }
 
 const API_BASE = resolveApiBaseUrl();
@@ -110,6 +135,7 @@ export const contactApi = {
 export const resourcesApi = {
   getAll: () => api.get("/resources"),
 };
+
 
 
 
