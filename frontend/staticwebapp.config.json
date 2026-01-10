@@ -2,10 +2,10 @@
   "routes": [
     {
       "route": "/*",
-      "redirect": "https://www.my-primarycare.com",
+      "redirect": "https://my-primarycare.com",
       "statusCode": 301,
       "conditions": {
-        "host": ["my-primarycare.com"]
+        "host": ["www.my-primarycare.com"]
       }
     }
   ],
