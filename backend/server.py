@@ -8,8 +8,8 @@ from typing import List, Optional, Dict, Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
 
@@ -74,6 +74,62 @@ api_router = APIRouter(prefix="/api")
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "pcs-api"}
+
+
+# =========================================================
+# CORS (configure BEFORE serving traffic)
+# =========================================================
+def parse_cors_origins(value: str) -> List[str]:
+    """
+    Accepts:
+      - "*"  (allow all)
+      - "https://a.com,https://b.com"
+      - empty string
+    """
+    if not value or value.strip() == "":
+        return []
+    v = value.strip()
+    if v == "*":
+        return ["*"]
+    return [o.strip() for o in v.split(",") if o.strip()]
+
+
+# Production-safe defaults:
+# - If CORS_ORIGINS is set in App Service, it will be used.
+# - If not set:
+#     - PROD => allow only your official domains
+#     - NON-PROD => allow all ("*") for convenience
+cors_env = get_env("CORS_ORIGINS", "")
+cors_origins = parse_cors_origins(cors_env)
+
+if not cors_origins:
+    if is_production():
+        cors_origins = [
+            "https://my-primarycare.com",
+            "https://www.my-primarycare.com",
+        ]
+        # Optional: if your frontend is still using the SWA default domain temporarily, uncomment:
+        # cors_origins.append("https://ashy-smoke-0f1273010.2.azurestaticapps.net")
+    else:
+        cors_origins = ["*"]
+
+allow_all = (len(cors_origins) == 1 and cors_origins[0] == "*")
+
+# You are not using cookies for auth, so keep this False.
+# If you ever move to cookie-based auth, set True and do NOT use "*" origins.
+allow_credentials = False
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=allow_credentials,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Content-Type"],
+    max_age=86400,
+)
+
+logger.info("CORS configured. ENV=%s | origins=%s", get_env("ENV", "unknown"), cors_origins)
 
 
 # =========================================================
@@ -212,7 +268,6 @@ async def _find_many(
         docs = await db[collection].find(q).to_list(length=limit)
     except Exception as e:
         logger.exception("Query failed for collection '%s'", collection)
-        # Return 500 so frontend can show real error instead of silently empty lists
         raise HTTPException(status_code=500, detail=f"DB query failed for {collection}: {str(e)}")
 
     for d in docs:
@@ -268,7 +323,6 @@ async def get_locations(request: Request):
     return await _find_many(db, "locations")
 
 
-# Your frontend calls /resources too
 @api_router.get("/resources")
 async def get_resources(request: Request):
     db = get_db(request)
@@ -330,35 +384,6 @@ async def preflight_handler(path: str):
 # Include router AFTER routes are declared
 app.include_router(api_router)
 
-
-# =========================================================
-# CORS
-# =========================================================
-def parse_cors_origins(value: str) -> List[str]:
-    if not value or value.strip() == "":
-        return ["*"]
-    v = value.strip()
-    if v == "*":
-        return ["*"]
-    return [o.strip() for o in v.split(",") if o.strip()]
-
-
-cors_origins = parse_cors_origins(get_env("CORS_ORIGINS", "*"))
-
-# IMPORTANT RULE:
-# allow_credentials=True cannot be used with allow_origins=["*"]
-allow_all = (len(cors_origins) == 1 and cors_origins[0] == "*")
-allow_credentials = False if allow_all else True
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=allow_credentials,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
-    expose_headers=["Content-Type"],
-    max_age=86400,
-)
 
 
 
