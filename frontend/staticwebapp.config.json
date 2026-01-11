@@ -1,14 +1,4 @@
 {
-  "routes": [
-    {
-      "route": "/*",
-      "redirect": "https://my-primarycare.com",
-      "statusCode": 301,
-      "conditions": {
-        "host": ["www.my-primarycare.com"]
-      }
-    }
-  ],
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [
