@@ -1,10 +1,8 @@
 // Providers.js
-// ✅ FIXES APPLIED:
-// 1) Fully responsive layout (mobile/tablet/desktop): spacing, typography, grid, image heights
-// 2) Hero now uses a static background image: /images/header/center2.jpg (like Home.js public path)
-// 3) Adds subtle overlay so text is readable on all screens
-// 4) Adds safer rendering: defensive array handling + image fallback + safer key fallback
-// 5) Adds simple empty-state message if API returns 0 providers
+// ✅ FIXES APPLIED (Provider profile navigation):
+// 1) Use a safe, consistent provider id in the Link (provider_id OR id OR providerId).
+// 2) If a provider does not have an id, we disable the button to avoid broken links.
+// 3) Keep your existing layout improvements + defensive rendering.
 
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -18,20 +16,15 @@ export default function Providers() {
   const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // ✅ FIX: provider photo fallback (prevents broken UI if photo_url is empty/404)
   const providerPhotoFallback = 'https://via.placeholder.com/900x900?text=Provider+Photo';
-
-  // ✅ FIX: hero background image (must exist in frontend/public/images/header/right2.jpg)
   const heroBg = '/images/header/right2.jpg';
 
   useEffect(() => {
     let isMounted = true;
-    
+
     const fetchProviders = async () => {
       try {
         const response = await providersApi.getAll();
-
-        // ✅ FIX: defensive parsing (avoid crash if response isn't an array)
         const data = Array.isArray(response?.data) ? response.data : [];
         if (!isMounted) return;
         setProviders(data);
@@ -72,12 +65,11 @@ export default function Providers() {
         className="relative overflow-hidden"
         data-testid="providers-hero"
         style={{
-          backgroundImage: `url(${heroBg})`, // ✅ FIX: static hero background image
+          backgroundImage: `url(${heroBg})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}
       >
-        {/* ✅ FIX: overlay for readability */}
         <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/55 to-black/25" />
 
         <div className="relative container mx-auto px-4 sm:px-6 lg:px-8 max-w-7xl py-12 sm:py-16 md:py-20 lg:py-24">
@@ -106,28 +98,30 @@ export default function Providers() {
               <p className="text-muted-foreground">Loading providers...</p>
             </div>
           ) : providers.length === 0 ? (
-            // ✅ FIX: empty state (helps debugging when seed/API isn't returning)
             <div className="text-center py-10">
               <p className="text-muted-foreground">
                 No providers found. Please confirm the API is running and seed data is loaded.
               </p>
             </div>
           ) : (
-            <div
-              className="
-                grid grid-cols-1
-                sm:grid-cols-2
-                lg:grid-cols-3
-                gap-6 sm:gap-7 lg:gap-8
-              "
-            >
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-7 lg:gap-8">
               {providers.map((provider, index) => {
                 const languages = Array.isArray(provider?.languages) ? provider.languages : [];
                 const locations = Array.isArray(provider?.locations) ? provider.locations : [];
 
+                // ✅ FIX: determine the id the detail page will use.
+                // Your seed uses provider_id — but this also supports alternate shapes.
+                const providerId =
+                  provider?.provider_id ??
+                  provider?.id ??
+                  provider?.providerId ??
+                  null;
+
+                const canNavigate = Boolean(providerId);
+
                 return (
                   <motion.div
-                    key={provider.provider_id ?? `${provider.name}-${index}`} // ✅ FIX: safer key fallback
+                    key={providerId ?? `${provider?.name ?? 'provider'}-${index}`}
                     {...fadeInUp}
                     transition={{ delay: Math.min(index * 0.06, 0.3) }}
                     className="
@@ -140,21 +134,20 @@ export default function Providers() {
                   >
                     <div className="relative overflow-hidden">
                       <img
-                        src={provider.photo_url || providerPhotoFallback}
-                        alt={provider.name || 'Provider'}
+                        src={provider?.photo_url || providerPhotoFallback}
+                        alt={provider?.name || 'Provider'}
                         className="
                           w-full object-cover
                           h-56 sm:h-64 md:h-72 lg:h-80
                           group-hover:scale-105 transition-transform duration-300
                         "
                         onError={(e) => {
-                          // ✅ FIX: fallback if URL fails
                           e.currentTarget.src = providerPhotoFallback;
                         }}
                         loading="lazy"
                       />
 
-                      {provider.accepting_patients && (
+                      {provider?.accepting_patients && (
                         <div className="absolute top-3 right-3 sm:top-4 sm:right-4 bg-green-600 text-white px-3 py-1 rounded-full text-xs font-semibold shadow-sm">
                           Accepting Patients
                         </div>
@@ -163,13 +156,13 @@ export default function Providers() {
 
                     <div className="p-5 sm:p-6">
                       <h3 className="text-xl sm:text-2xl font-semibold text-foreground mb-1">
-                        {provider.name}
+                        {provider?.name}
                       </h3>
                       <p className="text-sm text-primary font-medium mb-2">
-                        {provider.credentials}
+                        {provider?.credentials}
                       </p>
                       <p className="text-sm sm:text-base text-muted-foreground font-medium mb-4">
-                        {provider.specialty}
+                        {provider?.specialty}
                       </p>
 
                       <div className="space-y-2 mb-6">
@@ -188,15 +181,27 @@ export default function Providers() {
                         </div>
                       </div>
 
-                      <Button
-                        asChild
-                        className="w-full bg-primary text-primary-foreground hover:bg-primary/90 rounded-full"
-                      >
-                        <Link to={`/providers/${provider.provider_id}`}>
+                      {/* ✅ FIX: only render a working Link when providerId exists */}
+                      {canNavigate ? (
+                        <Button
+                          asChild
+                          className="w-full bg-primary text-primary-foreground hover:bg-primary/90 rounded-full"
+                        >
+                          <Link to={`/providers/${encodeURIComponent(providerId)}`}>
+                            View Full Profile
+                            <ArrowRight className="w-4 h-4 ml-2" />
+                          </Link>
+                        </Button>
+                      ) : (
+                        <Button
+                          disabled
+                          className="w-full rounded-full"
+                          title="This provider record is missing an id (provider_id)."
+                        >
                           View Full Profile
                           <ArrowRight className="w-4 h-4 ml-2" />
-                        </Link>
-                      </Button>
+                        </Button>
+                      )}
                     </div>
                   </motion.div>
                 );
