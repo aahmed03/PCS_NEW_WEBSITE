@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -94,37 +94,30 @@ def parse_cors_origins(value: str) -> List[str]:
     return [o.strip() for o in v.split(",") if o.strip()]
 
 
-# Production-safe defaults:
-# - If CORS_ORIGINS is set in App Service, it will be used.
-# - If not set:
-#     - PROD => allow only your official domains
-#     - NON-PROD => allow all ("*") for convenience
 cors_env = get_env("CORS_ORIGINS", "")
 cors_origins = parse_cors_origins(cors_env)
 
+# Defaults if not configured
 if not cors_origins:
     if is_production():
         cors_origins = [
             "https://my-primarycare.com",
             "https://www.my-primarycare.com",
         ]
-        # Optional: if your frontend is still using the SWA default domain temporarily, uncomment:
-        # cors_origins.append("https://ashy-smoke-0f1273010.2.azurestaticapps.net")
     else:
         cors_origins = ["*"]
 
 allow_all = (len(cors_origins) == 1 and cors_origins[0] == "*")
 
-# You are not using cookies for auth, so keep this False.
-# If you ever move to cookie-based auth, set True and do NOT use "*" origins.
+# JWT is sent via Authorization header, not cookies -> keep False
 allow_credentials = False
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=allow_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
     expose_headers=["Content-Type"],
     max_age=86400,
 )
@@ -155,7 +148,6 @@ async def startup_mongo():
         await app.state.db.command("ping")
         logger.info("Mongo initialized. DB=%s | timeout_ms=%s", DB_NAME, MONGO_TIMEOUT_MS)
     except Exception as e:
-        # Don't crash app; /api/health will show db_ok=false
         logger.error("Mongo ping failed on startup: %s", str(e))
 
 
@@ -189,7 +181,8 @@ if not JWT_SECRET:
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = int(get_env("JWT_EXPIRATION_HOURS", "24"))
 
-security = HTTPBearer()
+# ✅ FIX: auto_error=False gives nicer errors when token is missing
+security = HTTPBearer(auto_error=False)
 
 
 def create_access_token(data: dict) -> str:
@@ -199,19 +192,30 @@ def create_access_token(data: dict) -> str:
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
 async def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> dict:
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="Missing authentication token")
+
     token = credentials.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user_id: Optional[str] = payload.get("sub")
         if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+            raise HTTPException(status_code=401, detail="Invalid authentication token")
 
         db = get_db(request)
-        user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+        user = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
         return user
@@ -254,6 +258,31 @@ class ContactFormResponse(BaseModel):
     email: str = "unknown"  # sent | disabled | failed
 
 
+# ✅ Auth models
+class AuthRegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6, max_length=128)
+    full_name: str = Field(..., min_length=1, max_length=120)
+
+
+class AuthLoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class PublicUser(BaseModel):
+    user_id: str
+    email: EmailStr
+    full_name: str
+    created_at: str
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: PublicUser
+
+
 # =========================================================
 # Helpers: DB queries
 # =========================================================
@@ -273,6 +302,15 @@ async def _find_many(
     for d in docs:
         d.pop("_id", None)
     return docs
+
+
+def _public_user_from_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "user_id": doc.get("user_id"),
+        "email": doc.get("email"),
+        "full_name": doc.get("full_name"),
+        "created_at": doc.get("created_at"),
+    }
 
 
 # =========================================================
@@ -305,6 +343,69 @@ async def health(request: Request):
     }
 
 
+# -------------------------
+# ✅ AUTH ROUTES (FIX)
+# -------------------------
+@api_router.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+async def register_user(payload: AuthRegisterRequest, request: Request):
+    db = get_db(request)
+
+    existing = await db.users.find_one({"email": payload.email.lower()})
+    if existing:
+        raise HTTPException(status_code=400, detail="An account with this email already exists.")
+
+    user_doc = {
+        "user_id": str(uuid.uuid4()),
+        "email": payload.email.lower(),
+        "full_name": payload.full_name.strip(),
+        "password_hash": hash_password(payload.password),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    await db.users.insert_one(user_doc)
+
+    token = create_access_token({"sub": user_doc["user_id"], "email": user_doc["email"]})
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": _public_user_from_doc(user_doc),
+    }
+
+
+@api_router.post("/auth/login", response_model=AuthResponse)
+async def login_user(payload: AuthLoginRequest, request: Request):
+    db = get_db(request)
+
+    user = await db.users.find_one({"email": payload.email.lower()})
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    password_hash = user.get("password_hash", "")
+    if not password_hash or not verify_password(payload.password, password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    token = create_access_token({"sub": user["user_id"], "email": user["email"]})
+
+    # Remove sensitive fields
+    user.pop("_id", None)
+    user.pop("password_hash", None)
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": _public_user_from_doc(user),
+    }
+
+
+@api_router.get("/auth/me", response_model=PublicUser)
+async def me(current_user: dict = Depends(get_current_user)):
+    return current_user
+
+
+# -------------------------
+# Public data routes
+# -------------------------
 @api_router.get("/providers")
 async def get_providers(request: Request):
     db = get_db(request)
@@ -383,6 +484,7 @@ async def preflight_handler(path: str):
 
 # Include router AFTER routes are declared
 app.include_router(api_router)
+
 
 
 

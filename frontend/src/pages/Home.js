@@ -3,6 +3,9 @@
 // - Manual dots + arrows for slider
 // - Pause on hover (and on keyboard focus within hero)
 // - Keeps the "only one slide at a time" approach so links remain clickable
+// ✅ LOGIN / 405 "Method Not Allowed" HARDENING:
+// - Explicitly set type="button" on ALL <button> elements so they NEVER submit a parent <form>
+//   (405 often comes from an accidental submit to /login or /api/login)
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -224,17 +227,13 @@ export default function Home() {
             backgroundSize: 'cover',
             backgroundPosition: 'center',
           }}
-          // ✅ FIX: pause on hover
           onMouseEnter={() => setIsPaused(true)}
           onMouseLeave={() => setIsPaused(false)}
-          // ✅ FIX: pause when user tabs into hero buttons/links
           onFocusCapture={() => setIsPaused(true)}
           onBlurCapture={(e) => {
-            // if focus leaves the hero entirely, resume
             if (!e.currentTarget.contains(e.relatedTarget)) setIsPaused(false);
           }}
         >
-          {/* ✅ Only ONE slide exists at a time => links remain clickable */}
           <AnimatePresence mode="wait">
             <motion.div
               key={heroSlides[activeSlide].key}
@@ -332,14 +331,12 @@ export default function Home() {
             </motion.div>
           </AnimatePresence>
 
-          {/* ✅ NEW: Arrows (manual navigation) */}
+          {/* ✅ Arrows */}
           <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-3 sm:px-4 md:px-6 z-20 pointer-events-none">
-            {/* pointer-events-none here so it doesn't block hero content;
-                buttons themselves enable pointer events */}
             <button
-              type="button"
+              type="button" // ✅ IMPORTANT: never submit a form
               onClick={() => {
-                setIsPaused(true); // ✅ FIX: user is interacting, keep paused
+                setIsPaused(true);
                 goPrev();
               }}
               className="pointer-events-auto inline-flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-black/30 hover:bg-black/45 border border-white/30 backdrop-blur-sm text-white transition"
@@ -349,7 +346,7 @@ export default function Home() {
             </button>
 
             <button
-              type="button"
+              type="button" // ✅ IMPORTANT: never submit a form
               onClick={() => {
                 setIsPaused(true);
                 goNext();
@@ -361,14 +358,14 @@ export default function Home() {
             </button>
           </div>
 
-          {/* ✅ NEW: Dots (manual navigation) */}
+          {/* ✅ Dots */}
           <div className="absolute bottom-5 sm:bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2">
             {heroSlides.map((_, idx) => {
               const isActive = idx === activeSlide;
               return (
                 <button
                   key={`dot-${idx}`}
-                  type="button"
+                  type="button" // ✅ IMPORTANT: never submit a form
                   onClick={() => {
                     setIsPaused(true);
                     goTo(idx);
@@ -414,7 +411,6 @@ export default function Home() {
             </div>
           </motion.div>
 
-          {/* ✅ NEW: Pause hint (shows only while paused) */}
           {isPaused && (
             <div className="absolute top-4 right-4 z-20 hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/30 border border-white/25 text-white/90 text-xs backdrop-blur-sm">
               <span className="inline-block w-2 h-2 rounded-full bg-white/80" />
@@ -717,6 +713,7 @@ export default function Home() {
     </>
   );
 }
+
 
 
 

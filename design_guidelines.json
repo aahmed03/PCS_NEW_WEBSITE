@@ -132,7 +132,7 @@
         "usage": "Background patterns or card headers"
       },
       "logo": {
-        "url": "https://my-primarycare.com/images/support/Logo.jpg",
+        "url": "/images/header/Logo.jpg",
         "alt": "Primary Care Services Logo",
         "usage": "Header and Footer"
       }
