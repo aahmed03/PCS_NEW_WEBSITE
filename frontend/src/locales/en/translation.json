@@ -1,0 +1,79 @@
+{
+
+  
+  "language": {
+    "english": "English",
+    "spanish": "Español"
+  },
+
+
+  "nav": {
+    "home": "Home",
+    "providers": "Providers",
+    "services": "Services",
+    "preventiveCare": "Preventive Care",
+    "locations": "Locations",
+    "patientPortal": "Patient Portal",
+    "contact": "Contact"
+  },
+  "actions": {
+    "bookAppointment": "Book Appointment",
+    "call": "Call",
+    "login": "Login",
+    "logout": "Logout",
+    "search": "Search"
+  },
+  "header": {
+    "greeting": "Hi"
+  },
+  "footer": {
+    "quickLinks": "Quick Links",
+    "forPatients": "For Patients",
+    "about": "About Us",
+    "privacy": "Privacy Practices",
+    "hipaa": "HIPAA Notice",
+    "disclaimer": "Medical Disclaimer: This website provides general information only. For medical emergencies, call 911. Always consult your physician for medical advice.",
+    "patientEducation": "Patient Education",
+    "forms": "Forms & Documents",
+    "faq": "FAQ",
+    "portal": "Patient Portal"
+  },
+  "home": {
+    "heroTitle": "Compassionate Primary Care for Your Family",
+    "heroSubtitle": "Serving Lombard & Glendale Heights with trusted, patient-centered healthcare.",
+    "whyChooseUs": "Why Choose Us"
+  },
+  "providers": {
+    "title": "Our Providers",
+    "viewProfile": "View Profile"
+  },
+  "services": {
+    "title": "Our Services",
+    "learnMore": "Learn More"
+  },
+  "locationsPage": {
+    "title": "Our Locations",
+    "lombard": "Lombard Office",
+    "glendale": "Glendale Heights Office"
+  },
+  "auth": {
+    "loginTitle": "Welcome Back",
+    "email": "Email",
+    "password": "Password",
+    "fullName": "Full Name",
+    "register": "Create Account",
+    "noAccount": "Don't have an account?",
+    "haveAccount": "Already have an account?",
+    "signIn": "Sign In",
+    "signUp": "Sign Up"
+  },
+  "contactForm": {
+    "title": "Contact Us",
+    "name": "Name",
+    "phone": "Phone",
+    "subject": "Subject",
+    "message": "Message",
+    "submit": "Send Message"
+  }
+}
+

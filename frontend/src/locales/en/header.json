@@ -1,0 +1,15 @@
+{
+  "nav": {
+    "home": "Home",
+    "providers": "Providers",
+    "services": "Services",
+    "preventive_care": "Preventive Care",
+    "locations": "Locations",
+    "patient_portal": "Patient Portal"
+  },
+  "header": {
+    "call": "Call",
+    "book_appointment": "Book Appointment",
+    "hello": "Hi"
+  }
+}

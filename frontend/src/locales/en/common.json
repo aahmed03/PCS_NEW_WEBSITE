@@ -1,0 +1,33 @@
+{
+  "language": {
+    "english": "English",
+    "spanish": "Spanish"
+  },
+
+  "buttons": {
+    "read_more": "Read More",
+    "view_details": "View Details",
+    "book_appointment": "Book Appointment",
+    "learn_more": "Learn More",
+    "contact_us": "Contact Us",
+    "submit": "Submit",
+    "login": "Login",
+    "logout": "Logout",
+    "register": "Register"
+  },
+
+  "form": {
+    "name": "Full Name",
+    "email": "Email Address",
+    "phone": "Phone Number",
+    "subject": "Subject",
+    "message": "Message",
+    "send_message": "Send Message"
+  },
+
+  "alerts": {
+    "loading": "Loading...",
+    "error_loading": "Some content couldn't be loaded. Please refresh.",
+    "success": "Your request has been submitted successfully."
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "language": {
+    "english": "Inglés",
+    "spanish": "Español"
+  },
+
+  "buttons": {
+    "read_more": "Leer más",
+    "view_details": "Ver detalles",
+    "book_appointment": "Reservar cita",
+    "learn_more": "Aprender más",
+    "contact_us": "Contáctenos",
+    "submit": "Enviar",
+    "login": "Iniciar sesión",
+    "logout": "Cerrar sesión",
+    "register": "Registrarse"
+  },
+
+  "form": {
+    "name": "Nombre completo",
+    "email": "Correo electrónico",
+    "phone": "Número de teléfono",
+    "subject": "Asunto",
+    "message": "Mensaje",
+    "send_message": "Enviar mensaje"
+  },
+
+  "alerts": {
+    "loading": "Cargando...",
+    "error_loading": "Algunos contenidos no pudieron cargarse. Por favor actualice la página.",
+    "success": "Su solicitud ha sido enviada con éxito."
+  }
+}

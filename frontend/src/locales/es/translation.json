@@ -1,0 +1,77 @@
+{
+
+
+  "language": {
+    "english": "English",
+    "spanish": "Español"
+  },
+
+  "nav": {
+    "home": "Inicio",
+    "providers": "Proveedores",
+    "services": "Servicios",
+    "preventiveCare": "Cuidado Preventivo",
+    "locations": "Ubicaciones",
+    "patientPortal": "Portal del Paciente",
+    "contact": "Contacto"
+  },
+  "actions": {
+    "bookAppointment": "Programar Cita",
+    "call": "Llamar",
+    "login": "Iniciar Sesión",
+    "logout": "Cerrar Sesión",
+    "search": "Buscar"
+  },
+  "header": {
+    "greeting": "Hola"
+  },
+  "footer": {
+    "quickLinks": "Enlaces Rápidos",
+    "forPatients": "Para Pacientes",
+    "about": "Acerca de Nosotros",
+    "privacy": "Prácticas de Privacidad",
+    "hipaa": "Aviso HIPAA",
+    "disclaimer": "Descargo Médico: Este sitio web proporciona información general únicamente. Para emergencias médicas, llame al 911. Siempre consulte a su médico para obtener asesoramiento médico.",
+    "patientEducation": "Educación del Paciente",
+    "forms": "Formularios y Documentos",
+    "faq": "Preguntas Frecuentes",
+    "portal": "Portal del Paciente"
+  },
+  "home": {
+    "heroTitle": "Atención Primaria Compasiva para Su Familia",
+    "heroSubtitle": "Sirviendo a Lombard y Glendale Heights con atención médica confiable y centrada en el paciente.",
+    "whyChooseUs": "Por Qué Elegirnos"
+  },
+  "providers": {
+    "title": "Nuestros Proveedores",
+    "viewProfile": "Ver Perfil"
+  },
+  "services": {
+    "title": "Nuestros Servicios",
+    "learnMore": "Más Información"
+  },
+  "locationsPage": {
+    "title": "Nuestras Ubicaciones",
+    "lombard": "Oficina de Lombard",
+    "glendale": "Oficina de Glendale Heights"
+  },
+  "auth": {
+    "loginTitle": "Bienvenido de Nuevo",
+    "email": "Correo Electrónico",
+    "password": "Contraseña",
+    "fullName": "Nombre Completo",
+    "register": "Crear Cuenta",
+    "noAccount": "¿No tienes una cuenta?",
+    "haveAccount": "¿Ya tienes una cuenta?",
+    "signIn": "Ingresar",
+    "signUp": "Registrarse"
+  },
+  "contactForm": {
+    "title": "Contáctenos",
+    "name": "Nombre",
+    "phone": "Teléfono",
+    "subject": "Asunto",
+    "message": "Mensaje",
+    "submit": "Enviar Mensaje"
+  }
+}

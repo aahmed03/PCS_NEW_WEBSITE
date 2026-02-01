@@ -1,0 +1,12 @@
+{
+  "hero": {
+    "title": "Your Trusted Primary Care Provider",
+    "subtitle": "Compassionate, patient-centered care for your entire family."
+  },
+  "sections": {
+    "why_choose_us": "Why Choose Us",
+    "our_providers": "Our Providers",
+    "our_services": "Our Services",
+    "visit_us": "Visit Us"
+  }
+}

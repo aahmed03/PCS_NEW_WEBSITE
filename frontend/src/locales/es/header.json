@@ -1,0 +1,15 @@
+{
+  "nav": {
+    "home": "Inicio",
+    "providers": "Proveedores",
+    "services": "Servicios",
+    "preventive_care": "Cuidado Preventivo",
+    "locations": "Ubicaciones",
+    "patient_portal": "Portal del Paciente"
+  },
+  "header": {
+    "call": "Llamar",
+    "book_appointment": "Reservar cita",
+    "hello": "Hola"
+  }
+}
