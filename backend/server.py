@@ -1,489 +1,519 @@
 import os
 import uuid
 import logging
-import asyncio
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, status
+from fastapi import FastAPI, APIRouter, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer
+
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
 import jwt
-from jwt import ExpiredSignatureError, InvalidTokenError
-from passlib.context import CryptContext
 import resend
+import httpx
+from passlib.context import CryptContext
 
 
-# =========================================================
-# Load .env for local only (App Service env vars override)
-# =========================================================
-ROOT_DIR = Path(__file__).resolve().parent
-ENV_FILE = ROOT_DIR / ".env"
-if ENV_FILE.exists():
-    load_dotenv(ENV_FILE)
+# ============================================================
+# Load .env for LOCAL development
+# Azure uses App Settings
+# ============================================================
+
+ROOT = Path(__file__).resolve().parent
+env_file = ROOT / ".env"
+
+if env_file.exists():
+    load_dotenv(env_file)
 
 
-# =========================================================
+# ============================================================
 # Logging
-# =========================================================
-LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+# ============================================================
+
 logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL, logging.INFO),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
+
 logger = logging.getLogger("pcs-api")
 
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
-logging.getLogger("azure.monitor.opentelemetry.exporter").setLevel(logging.WARNING)
-logging.getLogger("azure.core").setLevel(logging.WARNING)
 
-
-# =========================================================
-# Helpers
-# =========================================================
-def require_env(name: str) -> str:
-    v = os.environ.get(name)
-    if not v:
-        raise RuntimeError(
-            f"Missing required environment variable: {name}. "
-            f"Set it in Azure App Settings or backend/.env"
-        )
-    return v.strip()
-
+# ============================================================
+# Environment helper
+# ============================================================
 
 def get_env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
 
-def is_production() -> bool:
-    return get_env("ENV", "").lower() in ("prod", "production")
+# ============================================================
+# FastAPI
+# ============================================================
 
-
-# =========================================================
-# App
-# =========================================================
 app = FastAPI(title="Primary Care Services API")
-api_router = APIRouter(prefix="/api")
+
+api = APIRouter(prefix="/api")
+
+app.state.mongo_client = None
+app.state.db = None
+app.state.db_error = None
 
 
-@app.get("/")
-async def root():
-    return {"status": "ok", "service": "pcs-api"}
+# ============================================================
+# CORS
+# ============================================================
 
+CORS_ORIGINS = get_env("CORS_ORIGINS", "")
 
-# =========================================================
-# CORS (configure BEFORE serving traffic)
-# =========================================================
-def parse_cors_origins(value: str) -> List[str]:
-    """
-    Accepts:
-      - "*"  (allow all)
-      - "https://a.com,https://b.com"
-      - empty string
-    """
-    if not value or value.strip() == "":
-        return []
-    v = value.strip()
-    if v == "*":
-        return ["*"]
-    return [o.strip() for o in v.split(",") if o.strip()]
-
-
-cors_env = get_env("CORS_ORIGINS", "")
-cors_origins = parse_cors_origins(cors_env)
-
-# Defaults if not configured
-if not cors_origins:
-    if is_production():
-        cors_origins = [
-            "https://my-primarycare.com",
-            "https://www.my-primarycare.com",
-        ]
-    else:
-        cors_origins = ["*"]
-
-allow_all = (len(cors_origins) == 1 and cors_origins[0] == "*")
-
-# JWT is sent via Authorization header, not cookies -> keep False
-allow_credentials = False
+origins = (
+    [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
+    if CORS_ORIGINS
+    else ["*"]
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=allow_credentials,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
-    expose_headers=["Content-Type"],
-    max_age=86400,
+    allow_origins=origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
 )
 
-logger.info("CORS configured. ENV=%s | origins=%s", get_env("ENV", "unknown"), cors_origins)
 
+# ============================================================
+# MongoDB
+# ============================================================
 
-# =========================================================
-# Mongo (init on startup)
-# =========================================================
-MONGO_URL = require_env("MONGO_URL")
-DB_NAME = require_env("DB_NAME")
-MONGO_TIMEOUT_MS = int(get_env("MONGO_TIMEOUT_MS", "5000"))
+MONGO_URL = get_env("MONGO_URL")
+DB_NAME = get_env("DB_NAME")
 
 
 @app.on_event("startup")
-async def startup_mongo():
-    app.state.mongo_client = AsyncIOMotorClient(
-        MONGO_URL,
-        serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
-        connectTimeoutMS=MONGO_TIMEOUT_MS,
-        socketTimeoutMS=MONGO_TIMEOUT_MS,
-        tz_aware=True,
-    )
-    app.state.db = app.state.mongo_client[DB_NAME]
+async def mongo_startup():
+
+    if not MONGO_URL:
+        app.state.db_error = "Missing MONGO_URL"
+        logger.error(app.state.db_error)
+        return
+
+    if not DB_NAME:
+        app.state.db_error = "Missing DB_NAME"
+        logger.error(app.state.db_error)
+        return
 
     try:
-        await app.state.db.command("ping")
-        logger.info("Mongo initialized. DB=%s | timeout_ms=%s", DB_NAME, MONGO_TIMEOUT_MS)
+        client = AsyncIOMotorClient(
+            MONGO_URL,
+            maxPoolSize=5,
+            minPoolSize=1,
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=10000,
+            appname="pcs-api",
+        )
+
+        db = client[DB_NAME]
+
+        await db.command("ping")
+
+        app.state.mongo_client = client
+        app.state.db = db
+        app.state.db_error = None
+
+        logger.info(f"MongoDB connected → DB={DB_NAME}")
+
     except Exception as e:
-        logger.error("Mongo ping failed on startup: %s", str(e))
+        app.state.mongo_client = None
+        app.state.db = None
+        app.state.db_error = str(e)
+        logger.exception("MongoDB connection failed")
 
 
 @app.on_event("shutdown")
-async def shutdown_mongo():
+async def mongo_shutdown():
+
     client = getattr(app.state, "mongo_client", None)
+
     if client:
         client.close()
-        logger.info("Mongo client closed.")
+        logger.info("MongoDB connection closed")
 
 
 def get_db(request: Request):
+
     db = getattr(request.app.state, "db", None)
+
     if db is None:
-        raise HTTPException(status_code=503, detail="Database not initialized")
+        error = getattr(request.app.state, "db_error", None)
+
+        raise HTTPException(
+            status_code=503,
+            detail=error or "Database not available"
+        )
+
     return db
 
 
-# =========================================================
-# Auth / JWT
-# =========================================================
+# ============================================================
+# JWT Authentication
+# ============================================================
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-JWT_SECRET = get_env("JWT_SECRET", "")
-if not JWT_SECRET:
-    if is_production():
-        raise RuntimeError("JWT_SECRET is required in production. Set it in Azure App Settings.")
-    JWT_SECRET = "dev-only-change-me"
-    logger.warning("JWT_SECRET not set. Using dev-only secret (NOT SAFE FOR PRODUCTION).")
+JWT_SECRET = get_env("JWT_SECRET", "dev-secret")
+JWT_ALGO = "HS256"
 
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = int(get_env("JWT_EXPIRATION_HOURS", "24"))
-
-# ✅ FIX: auto_error=False gives nicer errors when token is missing
 security = HTTPBearer(auto_error=False)
 
 
-def create_access_token(data: dict) -> str:
-    to_encode = data.copy()
-    exp = datetime.now(timezone.utc).timestamp() + (JWT_EXPIRATION_HOURS * 3600)
-    to_encode.update({"exp": int(exp)})
-    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+def create_token(payload: dict) -> str:
+
+    payload = payload.copy()
+    payload["exp"] = datetime.now(timezone.utc) + timedelta(days=1)
+
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+def verify_password(password: str, hash_value: str) -> bool:
+    return pwd_context.verify(password, hash_value)
 
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
-async def get_current_user(
-    request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-) -> dict:
-    if not credentials or not credentials.credentials:
-        raise HTTPException(status_code=401, detail="Missing authentication token")
-
-    token = credentials.credentials
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        user_id: Optional[str] = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication token")
-
-        db = get_db(request)
-        user = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        return user
-
-    except ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
-    except InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-
-
-# =========================================================
+# ============================================================
 # Email (Resend)
-# =========================================================
-RESEND_API_KEY = get_env("RESEND_API_KEY", "")
-SENDER_EMAIL = get_env("SENDER_EMAIL", "onboarding@resend.dev")
-CONTACT_TO_EMAIL = get_env("CONTACT_TO_EMAIL", "info@my-primarycare.com")
+# ============================================================
+
+RESEND_API_KEY = get_env("RESEND_API_KEY")
+
+SENDER_EMAIL = get_env(
+    "SENDER_EMAIL",
+    "no-reply@resend.my-primarycare.com"
+)
+
+CONTACT_TO_EMAIL = get_env(
+    "CONTACT_TO_EMAIL",
+    "info@my-primarycare.com"
+)
 
 EMAIL_ENABLED = bool(RESEND_API_KEY)
+
 if EMAIL_ENABLED:
     resend.api_key = RESEND_API_KEY
-    logger.info("Email enabled via Resend. Sender=%s To=%s", SENDER_EMAIL, CONTACT_TO_EMAIL)
+    logger.info("Resend email enabled")
 else:
-    logger.warning("RESEND_API_KEY not set. Contact emails will be stored but NOT emailed.")
+    logger.warning("Email disabled (missing RESEND_API_KEY)")
 
 
-# =========================================================
-# Models
-# =========================================================
-class ContactFormSubmit(BaseModel):
-    name: str = Field(..., min_length=1, max_length=120)
-    email: EmailStr
-    phone: str = Field(..., min_length=3, max_length=40)
-    subject: str = Field(..., min_length=1, max_length=160)
-    message: str = Field(..., min_length=1, max_length=5000)
+# ============================================================
+# reCAPTCHA
+# ============================================================
+
+RECAPTCHA_SECRET = get_env("RECAPTCHA_SECRET")
+APP_ENV = get_env("ENV", "development").lower()
 
 
-class ContactFormResponse(BaseModel):
-    status: str
-    message: str
-    email: str = "unknown"  # sent | disabled | failed
+async def verify_recaptcha(token: str, ip: str) -> bool:
+    """
+    Skip verification locally.
+    Enforce verification in production.
+    """
 
+    # ------------------------------------------------
+    # Skip reCAPTCHA for local development
+    # ------------------------------------------------
+    if ip in ("127.0.0.1", "localhost", "::1"):
+        logger.info("reCAPTCHA skipped for localhost")
+        return True
 
-# ✅ Auth models
-class AuthRegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(..., min_length=6, max_length=128)
-    full_name: str = Field(..., min_length=1, max_length=120)
+    if APP_ENV == "development":
+        logger.info("reCAPTCHA skipped (development env)")
+        return True
 
+    # ------------------------------------------------
+    # Production verification
+    # ------------------------------------------------
+    if not RECAPTCHA_SECRET:
+        logger.warning("RECAPTCHA_SECRET missing — skipping verification")
+        return True
 
-class AuthLoginRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(..., min_length=1, max_length=128)
+    if not token:
+        logger.warning("reCAPTCHA token missing")
+        return False
 
-
-class PublicUser(BaseModel):
-    user_id: str
-    email: EmailStr
-    full_name: str
-    created_at: str
-
-
-class AuthResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user: PublicUser
-
-
-# =========================================================
-# Helpers: DB queries
-# =========================================================
-async def _find_many(
-    db,
-    collection: str,
-    query: Optional[Dict[str, Any]] = None,
-    limit: int = 500,
-) -> List[Dict[str, Any]]:
-    q = query or {}
     try:
-        docs = await db[collection].find(q).to_list(length=limit)
-    except Exception as e:
-        logger.exception("Query failed for collection '%s'", collection)
-        raise HTTPException(status_code=500, detail=f"DB query failed for {collection}: {str(e)}")
 
-    for d in docs:
-        d.pop("_id", None)
-    return docs
+        async with httpx.AsyncClient(timeout=8) as client:
+
+            resp = await client.post(
+                "https://www.google.com/recaptcha/api/siteverify",
+                data={
+                    "secret": RECAPTCHA_SECRET,
+                    "response": token,
+                    "remoteip": ip,
+                },
+            )
+
+        data = resp.json()
+
+        logger.info(f"reCAPTCHA response = {data}")
+
+        if not data.get("success"):
+            return False
+
+        score = float(data.get("score", 0))
+
+        return score >= 0.3
+
+    except Exception:
+        logger.exception("reCAPTCHA verification failed")
+        return False
 
 
-def _public_user_from_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
+# ============================================================
+# Rate limiting
+# ============================================================
+
+RATE_LIMIT = {}
+RATE_WINDOW = 60
+RATE_MAX = 3
+
+
+def rate_limit(ip: str) -> bool:
+
+    now = datetime.utcnow().timestamp()
+
+    hits = [t for t in RATE_LIMIT.get(ip, []) if now - t < RATE_WINDOW]
+
+    if len(hits) >= RATE_MAX:
+        return False
+
+    hits.append(now)
+    RATE_LIMIT[ip] = hits
+
+    return True
+
+
+# ============================================================
+# Models
+# ============================================================
+
+class ContactForm(BaseModel):
+
+    name: str
+    email: EmailStr
+    phone: str
+    subject: str
+    message: str
+
+    recaptcha_token: Optional[str] = ""
+    website: Optional[str] = ""
+
+
+# ============================================================
+# Root
+# ============================================================
+
+@app.get("/")
+async def root():
+    return {"message": "Primary Care Services API is running"}
+
+
+# ============================================================
+# Contact Form
+# ============================================================
+
+
+@api.post("/contact")
+async def contact(request: Request, form: ContactForm):
+
+    ip = request.client.host or ""
+
+    # Honeypot trap
+    if form.website:
+        return {"status": "ok"}
+
+    # Rate limit
+    if not rate_limit(ip):
+        raise HTTPException(429, "Too many requests")
+
+    # ------------------------------------------------
+    # Skip reCAPTCHA completely for localhost
+    # ------------------------------------------------
+    if ip not in ("127.0.0.1", "localhost", "::1"):
+        if not await verify_recaptcha(form.recaptcha_token, ip):
+            raise HTTPException(400, "reCAPTCHA failed")
+
+    db = getattr(request.app.state, "db", None)
+
+    if db:
+        await db.contacts.insert_one({
+            "contact_id": str(uuid.uuid4()),
+            "name": form.name,
+            "email": form.email,
+            "phone": form.phone,
+            "subject": form.subject,
+            "message": form.message,
+            "submitted_at": datetime.utcnow().isoformat(),
+            "ip": ip,
+        })
+
+    # Send email notification (if enabled)
+    if EMAIL_ENABLED:
+        try:
+            resend.Emails.send({
+                "from": SENDER_EMAIL,
+                "to": CONTACT_TO_EMAIL,
+                "reply_to": form.email,
+                "subject": f"Website Contact Form: {form.subject}",
+                "html": f"""
+                <h2>New Contact Form Submission</h2>
+                <p><b>Name:</b> {form.name}</p>
+                <p><b>Email:</b> {form.email}</p>
+                <p><b>Phone:</b> {form.phone}</p>
+                <p><b>Subject:</b> {form.subject}</p>
+                <p><b>Message:</b></p>
+                <p>{form.message}</p>
+                <hr>
+                <p>Submitted at: {datetime.utcnow().isoformat()}</p>
+                <p>IP Address: {ip}</p>
+                """
+            })
+
+            logger.info("Contact email sent")
+
+        except Exception:
+            logger.exception("Contact email failed")
+
+    return {"status": "ok"}
+
+# ============================================================
+# Providers
+# ============================================================
+
+@api.get("/providers")
+async def providers(request: Request):
+
+    db = get_db(request)
+
+    rows = await db.providers.find().to_list(500)
+
+    for r in rows:
+        r.pop("_id", None)
+
     return {
-        "user_id": doc.get("user_id"),
-        "email": doc.get("email"),
-        "full_name": doc.get("full_name"),
-        "created_at": doc.get("created_at"),
+        "count": len(rows),
+        "items": rows
     }
 
 
-# =========================================================
-# API Routes
-# =========================================================
-@api_router.get("/")
-async def api_root():
-    return {"message": "Primary Care Services API"}
+# ============================================================
+# Provider Detail
+# ============================================================
+
+@api.get("/providers/{provider_id}")
+async def provider_detail(provider_id: str, request: Request):
+
+    db = get_db(request)
+
+    provider_id = provider_id.strip()
+
+    provider = await db.providers.find_one({
+        "provider_id": {"$regex": f"^{provider_id}$", "$options": "i"}
+    })
+
+    if not provider:
+        raise HTTPException(404, "Provider not found")
+
+    provider.pop("_id", None)
+
+    return provider
 
 
-@api_router.get("/health")
+# ============================================================
+# Services
+# ============================================================
+
+@api.get("/services")
+async def services(request: Request):
+
+    db = get_db(request)
+
+    rows = await db.services.find().to_list(500)
+
+    for r in rows:
+        r.pop("_id", None)
+
+    return {
+        "count": len(rows),
+        "items": rows
+    }
+
+
+# ============================================================
+# Locations
+# ============================================================
+
+@api.get("/locations")
+async def locations(request: Request):
+
+    db = get_db(request)
+
+    rows = await db.locations.find().to_list(500)
+
+    for r in rows:
+        r.pop("_id", None)
+
+    return {
+        "count": len(rows),
+        "items": rows
+    }
+
+
+# ============================================================
+# Health
+# ============================================================
+
+@api.get("/health")
 async def health(request: Request):
+
+    db = getattr(request.app.state, "db", None)
+
     db_ok = False
-    error = None
-    try:
-        db = get_db(request)
-        await db.command("ping")
-        db_ok = True
-    except Exception as e:
-        error = str(e)
-        logger.warning("DB ping failed: %s", error)
+    db_error = getattr(request.app.state, "db_error", None)
+
+    if db:
+        try:
+            await db.command("ping")
+            db_ok = True
+        except Exception as e:
+            db_error = str(e)
 
     return {
         "status": "ok",
-        "time": datetime.now(timezone.utc).isoformat(),
-        "env": get_env("ENV", "unknown"),
-        "db_ok": db_ok,
-        "db_error": error,
-        "email_enabled": EMAIL_ENABLED,
+        "db": db_ok,
+        "db_error": db_error,
+        "time": datetime.utcnow().isoformat(),
+        "env": APP_ENV,
     }
 
 
-# -------------------------
-# ✅ AUTH ROUTES (FIX)
-# -------------------------
-@api_router.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def register_user(payload: AuthRegisterRequest, request: Request):
-    db = get_db(request)
+# ============================================================
+# Router
+# ============================================================
 
-    existing = await db.users.find_one({"email": payload.email.lower()})
-    if existing:
-        raise HTTPException(status_code=400, detail="An account with this email already exists.")
-
-    user_doc = {
-        "user_id": str(uuid.uuid4()),
-        "email": payload.email.lower(),
-        "full_name": payload.full_name.strip(),
-        "password_hash": hash_password(payload.password),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    await db.users.insert_one(user_doc)
-
-    token = create_access_token({"sub": user_doc["user_id"], "email": user_doc["email"]})
-
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "user": _public_user_from_doc(user_doc),
-    }
+app.include_router(api)
 
 
-@api_router.post("/auth/login", response_model=AuthResponse)
-async def login_user(payload: AuthLoginRequest, request: Request):
-    db = get_db(request)
-
-    user = await db.users.find_one({"email": payload.email.lower()})
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password.")
-
-    password_hash = user.get("password_hash", "")
-    if not password_hash or not verify_password(payload.password, password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password.")
-
-    token = create_access_token({"sub": user["user_id"], "email": user["email"]})
-
-    # Remove sensitive fields
-    user.pop("_id", None)
-    user.pop("password_hash", None)
-
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "user": _public_user_from_doc(user),
-    }
 
 
-@api_router.get("/auth/me", response_model=PublicUser)
-async def me(current_user: dict = Depends(get_current_user)):
-    return current_user
-
-
-# -------------------------
-# Public data routes
-# -------------------------
-@api_router.get("/providers")
-async def get_providers(request: Request):
-    db = get_db(request)
-    return await _find_many(db, "providers")
-
-
-@api_router.get("/services")
-async def get_services(request: Request):
-    db = get_db(request)
-    return await _find_many(db, "services")
-
-
-@api_router.get("/locations")
-async def get_locations(request: Request):
-    db = get_db(request)
-    return await _find_many(db, "locations")
-
-
-@api_router.get("/resources")
-async def get_resources(request: Request):
-    db = get_db(request)
-    return await _find_many(db, "resources")
-
-
-@api_router.post("/contact", response_model=ContactFormResponse)
-async def submit_contact_form(form_data: ContactFormSubmit, request: Request):
-    db = get_db(request)
-
-    contact_doc = form_data.model_dump()
-    contact_doc["contact_id"] = str(uuid.uuid4())
-    contact_doc["submitted_at"] = datetime.now(timezone.utc).isoformat()
-
-    await db.contacts.insert_one(contact_doc)
-
-    email_status = "disabled"
-    if EMAIL_ENABLED:
-        html_content = f"""
-        <html><body style="font-family: Arial, sans-serif;">
-        <h2>New Contact Form Submission</h2>
-        <p><b>Name:</b> {form_data.name}</p>
-        <p><b>Email:</b> {form_data.email}</p>
-        <p><b>Phone:</b> {form_data.phone}</p>
-        <p><b>Subject:</b> {form_data.subject}</p>
-        <p><b>Message:</b></p>
-        <p>{form_data.message}</p>
-        </body></html>
-        """
-
-        params = {
-            "from": SENDER_EMAIL,
-            "to": [CONTACT_TO_EMAIL],
-            "subject": f"Contact Form: {form_data.subject}",
-            "html": html_content,
-            "reply_to": str(form_data.email),
-        }
-
-        try:
-            await asyncio.to_thread(resend.Emails.send, params)
-            email_status = "sent"
-        except Exception as e:
-            logger.error("Email send failed: %s", str(e))
-            email_status = "failed"
-
-    return ContactFormResponse(
-        status="success",
-        message="Thank you for contacting us. We will respond within 24-48 hours.",
-        email=email_status,
-    )
-
-
-# Explicit OPTIONS handler (helps preflight in some edge cases)
-@api_router.options("/{path:path}")
-async def preflight_handler(path: str):
-    return Response(status_code=204)
-
-
-# Include router AFTER routes are declared
-app.include_router(api_router)
 
 
 

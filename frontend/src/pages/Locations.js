@@ -22,7 +22,18 @@ export default function Locations() {
         setLoadError(null);
 
         const response = await locationsApi.getAll();
-        const data = Array.isArray(response?.data) ? response.data : [];
+
+        // FIX:
+        // Support both API response shapes:
+        // 1) [ ...locations ]
+        // 2) { count: X, items: [ ...locations ] }
+        let data = [];
+
+        if (Array.isArray(response?.data)) {
+          data = response.data;
+        } else if (Array.isArray(response?.data?.items)) {
+          data = response.data.items;
+        }
 
         if (!mounted) return;
         setLocations(data);
@@ -54,7 +65,7 @@ export default function Locations() {
     []
   );
 
-  // ✅ Memoize helpers so useMemo dependencies are stable / lint-clean
+  // Memoized helpers so useMemo dependencies are stable / lint-clean
   const buildAddressString = useCallback((location) => {
     const address = String(location?.address ?? "").trim();
     const city = String(location?.city ?? "").trim();
@@ -68,12 +79,9 @@ export default function Locations() {
   const normalizePhoneDigits = useCallback((phone) => String(phone || "").replace(/\D/g, ""), []);
 
   /**
-   * ✅ FIX for "Invalid 'pb' parameter"
-   * Many generated embed strings with `pb=!1m18!...` are brittle and often invalid.
-   * We will:
-   *  - Prefer coordinates if provided
-   *  - Otherwise build a safe embed URL using q=<address>&output=embed (no API key)
-   *  - Never pass through broken pb strings
+   * FIX for brittle Google embed strings
+   * Prefer coordinates if available
+   * Otherwise safely build a q=<address>&output=embed URL
    */
   const getSafeEmbedSrc = useCallback(
     (location) => {
@@ -99,6 +107,7 @@ export default function Locations() {
 
   const locationsView = useMemo(() => {
     const list = Array.isArray(locations) ? locations : [];
+
     return list.map((loc) => {
       const addressString = buildAddressString(loc);
       const phoneDigits = normalizePhoneDigits(loc?.phone);
@@ -372,5 +381,4 @@ export default function Locations() {
     </>
   );
 }
-
 

@@ -157,35 +157,41 @@ export default function Home() {
     let isMounted = true;
 
     const fetchData = async () => {
-      try {
-        setLoading(true);
-        setLoadError(null);
+  try {
+    setLoading(true);
+    setLoadError(null);
 
-        const [providersRes, servicesRes, locationsRes] = await Promise.all([
-          providersApi.getAll(),
-          servicesApi.getAll(),
-          locationsApi.getAll(),
-        ]);
+    const [providersRes, servicesRes, locationsRes] = await Promise.all([
+      providersApi.getAll(),
+      servicesApi.getAll(),
+      locationsApi.getAll(),
+    ]);
 
-        const providersData = Array.isArray(providersRes?.data) ? providersRes.data : [];
-        const servicesData = Array.isArray(servicesRes?.data) ? servicesRes.data : [];
-        const locationsData = Array.isArray(locationsRes?.data) ? locationsRes.data : [];
-
-        if (!isMounted) return;
-
-        setProviders(providersData.slice(0, 3));
-        setServices(servicesData.slice(0, 6));
-        setLocations(locationsData);
-      } catch (error) {
-        if (!isMounted) return;
-        console.error('Failed to fetch data:', error);
-        setLoadError(error);
-      } finally {
-        if (!isMounted) return;
-        setLoading(false);
-      }
+    // Support BOTH response formats
+    const normalize = (res) => {
+      if (Array.isArray(res?.data)) return res.data;
+      if (Array.isArray(res?.data?.items)) return res.data.items;
+      return [];
     };
 
+    const providersData = normalize(providersRes);
+    const servicesData = normalize(servicesRes);
+    const locationsData = normalize(locationsRes);
+
+    if (!isMounted) return;
+
+    setProviders(providersData.slice(0, 3));
+    setServices(servicesData.slice(0, 6));
+    setLocations(locationsData);
+  } catch (error) {
+    if (!isMounted) return;
+    console.error("Failed to fetch data:", error);
+    setLoadError(error);
+  } finally {
+    if (!isMounted) return;
+    setLoading(false);
+  }
+};
     fetchData();
     return () => {
       isMounted = false;
