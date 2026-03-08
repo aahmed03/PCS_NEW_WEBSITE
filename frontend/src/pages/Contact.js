@@ -29,10 +29,13 @@ import { loadReCaptcha } from "@/utils/recaptcha";
 // Supports BOTH Vite and CRA builds
 // ------------------------------------------------------------
 
-const SITE_KEY =
-  import.meta.env?.VITE_RECAPTCHA_SITE_KEY ||
-  process?.env?.REACT_APP_RECAPTCHA_SITE_KEY ||
-  "";
+// const SITE_KEY =
+//   import.meta.env?.VITE_RECAPTCHA_SITE_KEY ||
+//   process?.env?.REACT_APP_RECAPTCHA_SITE_KEY ||
+//   "";
+
+// VITE environment variable
+const SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || "";
 
 export default function Contact() {
 
