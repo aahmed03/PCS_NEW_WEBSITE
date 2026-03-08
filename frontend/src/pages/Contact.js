@@ -23,14 +23,25 @@ import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { loadReCaptcha } from "@/utils/recaptcha";
 
-// ENV
-//const SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
-const SITE_KEY = process.env.REACT_APP_RECAPTCHA_SITE_KEY;
+
+// ------------------------------------------------------------
+// ENVIRONMENT VARIABLES
+// Supports BOTH Vite and CRA builds
+// ------------------------------------------------------------
+
+const SITE_KEY =
+  import.meta.env?.VITE_RECAPTCHA_SITE_KEY ||
+  process?.env?.REACT_APP_RECAPTCHA_SITE_KEY ||
+  "";
 
 export default function Contact() {
+
   const heroImage = "/images/header/center2.jpg";
 
-  // Form state
+  // ------------------------------------------------------------
+  // Form State
+  // ------------------------------------------------------------
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -42,29 +53,41 @@ export default function Contact() {
 
   const [loading, setLoading] = useState(false);
   const [captcha, setCaptcha] = useState(null);
-  const [sent, setSent] = useState(false); // NEW: Show confirmation UI
+  const [sent, setSent] = useState(false);
 
-  // Load reCAPTCHA v3
- useEffect(() => {
 
-  if (!SITE_KEY) {
-    console.warn("reCAPTCHA site key missing");
-    return;
-  }
+  // ------------------------------------------------------------
+  // Load reCAPTCHA
+  // ------------------------------------------------------------
 
-  loadReCaptcha(SITE_KEY).then((grecaptcha) => {
+  useEffect(() => {
 
-    if (!grecaptcha) return;
+    if (!SITE_KEY) {
+      console.warn("reCAPTCHA site key missing");
+      return;
+    }
 
-    grecaptcha.ready(() => {
-      setCaptcha(grecaptcha);
-    });
+    loadReCaptcha(SITE_KEY)
+      .then((grecaptcha) => {
 
-  });
+        if (!grecaptcha) return;
+
+        grecaptcha.ready(() => {
+          setCaptcha(grecaptcha);
+        });
+
+      })
+      .catch((err) => {
+        console.warn("reCAPTCHA load failed:", err);
+      });
 
   }, []);
 
+
+  // ------------------------------------------------------------
   // Animations
+  // ------------------------------------------------------------
+
   const fadeInUp = {
     initial: { opacity: 0, y: 22 },
     animate: { opacity: 1, y: 0 },
@@ -73,9 +96,15 @@ export default function Contact() {
 
   const recipientEmail = "info@my-primarycare.com";
 
-  // Pre-build fallback mailto link
+
+  // ------------------------------------------------------------
+  // Build mailto fallback
+  // ------------------------------------------------------------
+
   const mailtoHref = useMemo(() => {
+
     const subject = formData.subject?.trim() || "Website Contact Form";
+
     const body = [
       `Name: ${formData.name}`,
       `Email: ${formData.email}`,
@@ -85,28 +114,38 @@ export default function Contact() {
     ].join("\n");
 
     const params = new URLSearchParams({ subject, body });
+
     return `mailto:${recipientEmail}?${params.toString()}`;
+
   }, [formData]);
 
+
+  // ------------------------------------------------------------
   // Utilities
+  // ------------------------------------------------------------
+
   const isValidEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+
   const phoneDigits = (v) => v.replace(/\D/g, "");
 
   const handleChange = (e) =>
     setFormData({ ...formData, [e.target.name]: e.target.value });
 
-  // SUBMIT FORM
+
+  // ------------------------------------------------------------
+  // Submit Form
+  // ------------------------------------------------------------
+
   const handleSubmit = async (e) => {
+
     e.preventDefault();
 
     if (formData.website.trim()) {
-      // Honeypot hit: silently succeed
       toast.success("Message sent!");
       setSent(true);
       return;
     }
 
-    // Simple validation
     if (
       !formData.name.trim() ||
       !formData.email.trim() ||
@@ -128,34 +167,41 @@ export default function Contact() {
       return;
     }
 
-    // reCAPTCHA v3 token
-    if (!captcha) {
-      console.warn("Captcha not ready yet — continuing without token");
-    }
 
-    //const token = await captcha.execute(SITE_KEY, { action: "submit" });
+    // ------------------------------------------------------------
+    // Execute reCAPTCHA
+    // ------------------------------------------------------------
 
     let token = "";
 
-  try {
+    if (captcha && SITE_KEY) {
 
-  await captcha.ready();
+      try {
 
-  token = await captcha.execute(SITE_KEY, {
-    action: "submit",
-  });
+        token = await captcha.execute(SITE_KEY, {
+          action: "submit",
+        });
 
-  } catch (err) {
-    console.warn("reCAPTCHA execution failed:", err);
-  }
+      } catch (err) {
+
+        console.warn("reCAPTCHA execution failed:", err);
+
+      }
+
+    } else {
+
+      console.warn("Captcha not ready yet — continuing without token");
+
+    }
 
     setLoading(true);
 
     try {
+
       await contactApi.submit({
         ...formData,
         phone: phoneDigits(formData.phone),
-        recaptcha_token: token, // <-- IMPORTANT
+        recaptcha_token: token,
       });
 
       toast.success("Message sent!");
@@ -169,17 +215,26 @@ export default function Contact() {
         message: "",
         website: "",
       });
+
     } catch (err) {
+
       console.error("Contact form failed:", err);
+
       toast.error("Form failed — opening your email app instead.");
+
       window.location.href = mailtoHref;
+
     } finally {
+
       setLoading(false);
+
     }
+
   };
 
+
   // ------------------------------------------------------------
-  // RENDER UI
+  // UI
   // ------------------------------------------------------------
 
   return (
@@ -188,9 +243,7 @@ export default function Contact() {
         <title>Contact Us - Primary Care Services</title>
       </Helmet>
 
-      {/* -------------------------------------
-          HERO
-        ------------------------------------- */}
+      {/* HERO */}
       <section className="relative overflow-hidden">
         <div
           className="relative w-full min-h-[360px] flex items-center bg-slate-900"
@@ -216,9 +269,8 @@ export default function Contact() {
         </div>
       </section>
 
-      {/* -------------------------------------
-          CONFIRMATION UI
-        ------------------------------------- */}
+
+      {/* Confirmation */}
       {sent && (
         <section className="bg-green-50 border-y border-green-200 py-6">
           <div className="container mx-auto px-6 max-w-4xl text-center">
@@ -230,26 +282,23 @@ export default function Contact() {
         </section>
       )}
 
-      {/* -------------------------------------
-          CONTACT SECTION
-        ------------------------------------- */}
+
+      {/* Contact Section */}
       <section className="py-16">
         <div className="container mx-auto px-6 max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-10">
+
           {/* LEFT SIDEBAR */}
+
           <motion.div {...fadeInUp} className="space-y-8">
-            {/* Phone */}
+
             <div className="p-6 bg-white rounded-2xl border shadow-sm">
               <Phone className="w-7 h-7 text-primary mb-3" />
               <h3 className="font-bold text-lg mb-1">Phone</h3>
-              <a
-                href="tel:6304299000"
-                className="text-muted-foreground hover:text-primary"
-              >
+              <a href="tel:6304299000" className="text-muted-foreground hover:text-primary">
                 (630) 429-9000
               </a>
             </div>
 
-            {/* Email */}
             <div className="p-6 bg-white rounded-2xl border shadow-sm">
               <Mail className="w-7 h-7 text-primary mb-3" />
               <h3 className="font-bold text-lg mb-1">Email</h3>
@@ -261,7 +310,6 @@ export default function Contact() {
               </a>
             </div>
 
-            {/* Locations */}
             <div className="p-6 bg-white rounded-2xl border shadow-sm">
               <MapPin className="w-7 h-7 text-primary mb-3" />
               <h3 className="font-bold text-lg mb-3">Locations</h3>
@@ -278,18 +326,13 @@ export default function Contact() {
                 Glendale Heights, IL 60139
               </p>
 
-              <Button
-                asChild
-                variant="outline"
-                className="mt-5 w-full rounded-full"
-              >
+              <Button asChild variant="outline" className="mt-5 w-full rounded-full">
                 <Link to="/locations">
                   View on Map <ExternalLink className="w-4 h-4 ml-2" />
                 </Link>
               </Button>
             </div>
 
-            {/* Hours */}
             <div className="p-6 bg-white rounded-2xl border shadow-sm">
               <Clock className="w-7 h-7 text-primary mb-3" />
               <h3 className="font-bold text-lg mb-2">Hours</h3>
@@ -299,16 +342,17 @@ export default function Contact() {
                 Sun: Closed
               </p>
             </div>
+
           </motion.div>
 
-          {/* FORM SECTION */}
-          <motion.div
-            {...fadeInUp}
-            transition={{ delay: 0.08 }}
-            className="lg:col-span-2"
-          >
+
+          {/* FORM */}
+
+          <motion.div {...fadeInUp} transition={{ delay: 0.08 }} className="lg:col-span-2">
             <div className="bg-white rounded-2xl border shadow-sm p-8">
+
               <h2 className="text-3xl font-bold mb-3">Send Us a Message</h2>
+
               <p className="text-muted-foreground mb-6">
                 This form is for non-urgent inquiries only. We typically
                 respond within 24-48 hours.
@@ -316,7 +360,6 @@ export default function Contact() {
 
               <form onSubmit={handleSubmit} className="space-y-6">
 
-                {/* Honeypot */}
                 <input
                   type="text"
                   name="website"
@@ -325,8 +368,8 @@ export default function Contact() {
                   onChange={handleChange}
                 />
 
-                {/* Name + Email */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
                   <div className="space-y-2">
                     <Label htmlFor="name">Full Name *</Label>
                     <Input
@@ -351,10 +394,12 @@ export default function Contact() {
                       required
                     />
                   </div>
+
                 </div>
 
-                {/* Phone + Subject */}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
                   <div className="space-y-2">
                     <Label htmlFor="phone">Phone *</Label>
                     <Input
@@ -378,11 +423,14 @@ export default function Contact() {
                       required
                     />
                   </div>
+
                 </div>
 
-                {/* Message */}
+
                 <div className="space-y-2">
+
                   <Label htmlFor="message">Message *</Label>
+
                   <Textarea
                     id="message"
                     name="message"
@@ -392,10 +440,12 @@ export default function Contact() {
                     placeholder="How can we help you?"
                     required
                   />
+
                 </div>
 
-                {/* Buttons */}
+
                 <div className="flex flex-col sm:flex-row gap-4">
+
                   <Button
                     type="submit"
                     disabled={loading}
@@ -414,6 +464,7 @@ export default function Contact() {
                       Use Email Instead <ExternalLink className="w-4 h-4 ml-2" />
                     </a>
                   </Button>
+
                 </div>
 
                 <p className="text-xs text-muted-foreground pt-2">
@@ -421,9 +472,12 @@ export default function Contact() {
                   delivered to our office email ({recipientEmail}). Do not use
                   this form for emergencies.
                 </p>
+
               </form>
+
             </div>
           </motion.div>
+
         </div>
       </section>
     </>
