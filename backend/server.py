@@ -1,9 +1,10 @@
 import os
 import uuid
 import logging
+from html import escape
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, APIRouter, HTTPException, Request
@@ -21,7 +22,7 @@ from passlib.context import CryptContext
 
 # ============================================================
 # Load .env for LOCAL development
-# Azure uses App Settings
+# Azure uses App Settings / Key Vault in production
 # ============================================================
 
 ROOT = Path(__file__).resolve().parent
@@ -44,11 +45,20 @@ logger = logging.getLogger("pcs-api")
 
 
 # ============================================================
-# Environment helper
+# Environment helpers
 # ============================================================
 
 def get_env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default).strip()
+    value = os.environ.get(name, default)
+    return str(value).strip()
+
+
+def get_first_env(*names: str, default: str = "") -> str:
+    for name in names:
+        value = get_env(name, "")
+        if value:
+            return value
+    return default
 
 
 # ============================================================
@@ -62,6 +72,7 @@ api = APIRouter(prefix="/api")
 app.state.mongo_client = None
 app.state.db = None
 app.state.db_error = None
+app.state.http_client = None
 
 
 # ============================================================
@@ -86,18 +97,32 @@ app.add_middleware(
 
 
 # ============================================================
-# MongoDB
+# MongoDB / CosmosDB (Mongo API)
+# Supports both MONGO_URL and MONGO_URI
 # ============================================================
 
-MONGO_URL = get_env("MONGO_URL")
-DB_NAME = get_env("DB_NAME")
+MONGO_URL = get_first_env("MONGO_URL", "MONGO_URI")
+DB_NAME = get_first_env("DB_NAME", "MONGO_DB_NAME")
+APP_ENV = get_env("ENV", "development").lower()
+
+
+def sanitize_doc(doc: dict[str, Any]) -> dict[str, Any]:
+    doc.pop("_id", None)
+    return doc
 
 
 @app.on_event("startup")
-async def mongo_startup():
+async def startup_event():
+    """
+    Application startup:
+    - Initialize reusable HTTP client
+    - Initialize Mongo / Cosmos DB connection
+    """
+
+    app.state.http_client = httpx.AsyncClient(timeout=8)
 
     if not MONGO_URL:
-        app.state.db_error = "Missing MONGO_URL"
+        app.state.db_error = "Missing MONGO_URL / MONGO_URI"
         logger.error(app.state.db_error)
         return
 
@@ -107,19 +132,27 @@ async def mongo_startup():
         return
 
     try:
+        # ----------------------------------------------------
+        # Motor / PyMongo client settings:
+        # tuned for Azure App Service + CosmosDB Mongo API
+        # ----------------------------------------------------
         client = AsyncIOMotorClient(
             MONGO_URL,
-            maxPoolSize=5,
+            appname="pcs-api",
+            maxPoolSize=10,
             minPoolSize=1,
+            maxIdleTimeMS=120000,
             serverSelectionTimeoutMS=5000,
             connectTimeoutMS=5000,
             socketTimeoutMS=10000,
-            appname="pcs-api",
+            retryWrites=False,   # CosmosDB Mongo API commonly prefers this disabled
+            tls=True,            # Cosmos requires TLS
         )
 
         db = client[DB_NAME]
 
-        await db.command("ping")
+        # Warm the connection on startup
+        await client.admin.command("ping")
 
         app.state.mongo_client = client
         app.state.db = db
@@ -135,22 +168,27 @@ async def mongo_startup():
 
 
 @app.on_event("shutdown")
-async def mongo_shutdown():
+async def shutdown_event():
+    """
+    Cleanly close shared clients.
+    """
 
-    client = getattr(app.state, "mongo_client", None)
+    http_client = getattr(app.state, "http_client", None)
+    if http_client:
+        await http_client.aclose()
+        logger.info("HTTP client closed")
 
-    if client:
-        client.close()
+    mongo_client = getattr(app.state, "mongo_client", None)
+    if mongo_client:
+        mongo_client.close()
         logger.info("MongoDB connection closed")
 
 
 def get_db(request: Request):
-
     db = getattr(request.app.state, "db", None)
 
     if db is None:
         error = getattr(request.app.state, "db_error", None)
-
         raise HTTPException(
             status_code=503,
             detail=error or "Database not available"
@@ -160,7 +198,8 @@ def get_db(request: Request):
 
 
 # ============================================================
-# JWT Authentication
+# JWT Authentication helpers
+# (kept here in case you re-enable auth routes later)
 # ============================================================
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -172,10 +211,8 @@ security = HTTPBearer(auto_error=False)
 
 
 def create_token(payload: dict) -> str:
-
     payload = payload.copy()
     payload["exp"] = datetime.now(timezone.utc) + timedelta(days=1)
-
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
 
@@ -217,18 +254,17 @@ else:
 # ============================================================
 
 RECAPTCHA_SECRET = get_env("RECAPTCHA_SECRET")
-APP_ENV = get_env("ENV", "development").lower()
 
 
-async def verify_recaptcha(token: str, ip: str) -> bool:
+async def verify_recaptcha(token: str, ip: str, request: Request) -> bool:
     """
     Skip verification locally.
     Enforce verification in production.
     """
 
-    # ------------------------------------------------
-    # Skip reCAPTCHA for local development
-    # ------------------------------------------------
+    # --------------------------------------------
+    # Skip for localhost / local dev
+    # --------------------------------------------
     if ip in ("127.0.0.1", "localhost", "::1"):
         logger.info("reCAPTCHA skipped for localhost")
         return True
@@ -237,9 +273,9 @@ async def verify_recaptcha(token: str, ip: str) -> bool:
         logger.info("reCAPTCHA skipped (development env)")
         return True
 
-    # ------------------------------------------------
+    # --------------------------------------------
     # Production verification
-    # ------------------------------------------------
+    # --------------------------------------------
     if not RECAPTCHA_SECRET:
         logger.warning("RECAPTCHA_SECRET missing — skipping verification")
         return True
@@ -249,17 +285,16 @@ async def verify_recaptcha(token: str, ip: str) -> bool:
         return False
 
     try:
+        http_client: httpx.AsyncClient = request.app.state.http_client
 
-        async with httpx.AsyncClient(timeout=8) as client:
-
-            resp = await client.post(
-                "https://www.google.com/recaptcha/api/siteverify",
-                data={
-                    "secret": RECAPTCHA_SECRET,
-                    "response": token,
-                    "remoteip": ip,
-                },
-            )
+        resp = await http_client.post(
+            "https://www.google.com/recaptcha/api/siteverify",
+            data={
+                "secret": RECAPTCHA_SECRET,
+                "response": token,
+                "remoteip": ip,
+            },
+        )
 
         data = resp.json()
 
@@ -269,7 +304,6 @@ async def verify_recaptcha(token: str, ip: str) -> bool:
             return False
 
         score = float(data.get("score", 0))
-
         return score >= 0.3
 
     except Exception:
@@ -281,15 +315,13 @@ async def verify_recaptcha(token: str, ip: str) -> bool:
 # Rate limiting
 # ============================================================
 
-RATE_LIMIT = {}
+RATE_LIMIT: dict[str, list[float]] = {}
 RATE_WINDOW = 60
 RATE_MAX = 3
 
 
 def rate_limit(ip: str) -> bool:
-
     now = datetime.utcnow().timestamp()
-
     hits = [t for t in RATE_LIMIT.get(ip, []) if now - t < RATE_WINDOW]
 
     if len(hits) >= RATE_MAX:
@@ -297,7 +329,6 @@ def rate_limit(ip: str) -> bool:
 
     hits.append(now)
     RATE_LIMIT[ip] = hits
-
     return True
 
 
@@ -306,13 +337,11 @@ def rate_limit(ip: str) -> bool:
 # ============================================================
 
 class ContactForm(BaseModel):
-
     name: str
     email: EmailStr
     phone: str
     subject: str
     message: str
-
     recaptcha_token: Optional[str] = ""
     website: Optional[str] = ""
 
@@ -330,10 +359,8 @@ async def root():
 # Contact Form
 # ============================================================
 
-
 @api.post("/contact")
 async def contact(request: Request, form: ContactForm):
-
     ip = request.client.host or ""
 
     # Honeypot trap
@@ -344,28 +371,29 @@ async def contact(request: Request, form: ContactForm):
     if not rate_limit(ip):
         raise HTTPException(429, "Too many requests")
 
-    # ------------------------------------------------
-    # Skip reCAPTCHA completely for localhost
-    # ------------------------------------------------
+    # Skip reCAPTCHA on localhost only
     if ip not in ("127.0.0.1", "localhost", "::1"):
-        if not await verify_recaptcha(form.recaptcha_token, ip):
+        if not await verify_recaptcha(form.recaptcha_token, ip, request):
             raise HTTPException(400, "reCAPTCHA failed")
 
     db = getattr(request.app.state, "db", None)
 
-    if db:
-        await db.contacts.insert_one({
-            "contact_id": str(uuid.uuid4()),
-            "name": form.name,
-            "email": form.email,
-            "phone": form.phone,
-            "subject": form.subject,
-            "message": form.message,
-            "submitted_at": datetime.utcnow().isoformat(),
-            "ip": ip,
-        })
+    if db is not None:
+        try:
+            await db.contacts.insert_one({
+                "contact_id": str(uuid.uuid4()),
+                "name": form.name,
+                "email": form.email,
+                "phone": form.phone,
+                "subject": form.subject,
+                "message": form.message,
+                "submitted_at": datetime.utcnow().isoformat(),
+                "ip": ip,
+            })
+        except Exception:
+            logger.exception("Failed to save contact form to database")
 
-    # Send email notification (if enabled)
+    # Send email notification
     if EMAIL_ENABLED:
         try:
             resend.Emails.send({
@@ -375,18 +403,17 @@ async def contact(request: Request, form: ContactForm):
                 "subject": f"Website Contact Form: {form.subject}",
                 "html": f"""
                 <h2>New Contact Form Submission</h2>
-                <p><b>Name:</b> {form.name}</p>
-                <p><b>Email:</b> {form.email}</p>
-                <p><b>Phone:</b> {form.phone}</p>
-                <p><b>Subject:</b> {form.subject}</p>
+                <p><b>Name:</b> {escape(form.name)}</p>
+                <p><b>Email:</b> {escape(form.email)}</p>
+                <p><b>Phone:</b> {escape(form.phone)}</p>
+                <p><b>Subject:</b> {escape(form.subject)}</p>
                 <p><b>Message:</b></p>
-                <p>{form.message}</p>
+                <p>{escape(form.message).replace(chr(10), "<br>")}</p>
                 <hr>
                 <p>Submitted at: {datetime.utcnow().isoformat()}</p>
-                <p>IP Address: {ip}</p>
+                <p>IP Address: {escape(ip)}</p>
                 """
             })
-
             logger.info("Contact email sent")
 
         except Exception:
@@ -394,19 +421,17 @@ async def contact(request: Request, form: ContactForm):
 
     return {"status": "ok"}
 
+
 # ============================================================
 # Providers
 # ============================================================
 
 @api.get("/providers")
 async def providers(request: Request):
-
     db = get_db(request)
 
     rows = await db.providers.find().to_list(500)
-
-    for r in rows:
-        r.pop("_id", None)
+    rows = [sanitize_doc(r) for r in rows]
 
     return {
         "count": len(rows),
@@ -420,7 +445,6 @@ async def providers(request: Request):
 
 @api.get("/providers/{provider_id}")
 async def provider_detail(provider_id: str, request: Request):
-
     db = get_db(request)
 
     provider_id = provider_id.strip()
@@ -432,9 +456,7 @@ async def provider_detail(provider_id: str, request: Request):
     if not provider:
         raise HTTPException(404, "Provider not found")
 
-    provider.pop("_id", None)
-
-    return provider
+    return sanitize_doc(provider)
 
 
 # ============================================================
@@ -443,13 +465,10 @@ async def provider_detail(provider_id: str, request: Request):
 
 @api.get("/services")
 async def services(request: Request):
-
     db = get_db(request)
 
     rows = await db.services.find().to_list(500)
-
-    for r in rows:
-        r.pop("_id", None)
+    rows = [sanitize_doc(r) for r in rows]
 
     return {
         "count": len(rows),
@@ -463,13 +482,10 @@ async def services(request: Request):
 
 @api.get("/locations")
 async def locations(request: Request):
-
     db = get_db(request)
 
     rows = await db.locations.find().to_list(500)
-
-    for r in rows:
-        r.pop("_id", None)
+    rows = [sanitize_doc(r) for r in rows]
 
     return {
         "count": len(rows),
@@ -479,22 +495,24 @@ async def locations(request: Request):
 
 # ============================================================
 # Health
+# Never crash here. Always return JSON.
 # ============================================================
 
 @api.get("/health")
 async def health(request: Request):
-
-    db = getattr(request.app.state, "db", None)
-
+    mongo_client = getattr(request.app.state, "mongo_client", None)
     db_ok = False
     db_error = getattr(request.app.state, "db_error", None)
 
-    if db:
-        try:
-            await db.command("ping")
+    try:
+        if mongo_client is not None:
+            await mongo_client.admin.command("ping")
             db_ok = True
-        except Exception as e:
-            db_error = str(e)
+            db_error = None
+    except Exception as e:
+        db_ok = False
+        db_error = str(e)
+        logger.warning(f"Health check DB ping failed: {db_error}")
 
     return {
         "status": "ok",
