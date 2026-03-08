@@ -21,7 +21,7 @@ from passlib.context import CryptContext
 
 
 # ============================================================
-# Load .env for LOCAL development
+# Load .env for LOCAL development - REDEPLOY
 # Azure uses App Settings / Key Vault in production
 # ============================================================
 
