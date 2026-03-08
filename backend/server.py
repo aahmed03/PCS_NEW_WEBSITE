@@ -111,6 +111,24 @@ def sanitize_doc(doc: dict[str, Any]) -> dict[str, Any]:
     return doc
 
 
+async def ensure_db_available(request: Request):
+    """
+    FIX:
+    Centralized DB availability check.
+    This is more production-safe because it:
+    - returns a clean 503 if startup DB connection failed
+    - protects endpoints from raw timeout tracebacks
+    """
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        error = getattr(request.app.state, "db_error", None)
+        raise HTTPException(
+            status_code=503,
+            detail=error or "Database not available"
+        )
+    return db
+
+
 @app.on_event("startup")
 async def startup_event():
     """
@@ -133,18 +151,19 @@ async def startup_event():
 
     try:
         # ----------------------------------------------------
-        # Motor / PyMongo client settings:
-        # tuned for Azure App Service + CosmosDB Mongo API
+        # FIX:
+        # Tuned for Azure App Service + CosmosDB Mongo API.
+        # Increased pool + timeouts for better production stability.
         # ----------------------------------------------------
         client = AsyncIOMotorClient(
             MONGO_URL,
             appname="pcs-api",
-            maxPoolSize=10,
-            minPoolSize=1,
+            maxPoolSize=50,
+            minPoolSize=5,
             maxIdleTimeMS=120000,
-            serverSelectionTimeoutMS=5000,
-            connectTimeoutMS=5000,
-            socketTimeoutMS=10000,
+            serverSelectionTimeoutMS=30000,
+            connectTimeoutMS=20000,
+            socketTimeoutMS=30000,
             retryWrites=False,   # CosmosDB Mongo API commonly prefers this disabled
             tls=True,            # Cosmos requires TLS
         )
@@ -182,19 +201,6 @@ async def shutdown_event():
     if mongo_client:
         mongo_client.close()
         logger.info("MongoDB connection closed")
-
-
-def get_db(request: Request):
-    db = getattr(request.app.state, "db", None)
-
-    if db is None:
-        error = getattr(request.app.state, "db_error", None)
-        raise HTTPException(
-            status_code=503,
-            detail=error or "Database not available"
-        )
-
-    return db
 
 
 # ============================================================
@@ -376,6 +382,11 @@ async def contact(request: Request, form: ContactForm):
         if not await verify_recaptcha(form.recaptcha_token, ip, request):
             raise HTTPException(400, "reCAPTCHA failed")
 
+    # --------------------------------------------------------
+    # FIX:
+    # Database insert is now fully isolated from email sending.
+    # Even if DB insert fails, email will still be attempted.
+    # --------------------------------------------------------
     db = getattr(request.app.state, "db", None)
 
     if db is not None:
@@ -390,10 +401,16 @@ async def contact(request: Request, form: ContactForm):
                 "submitted_at": datetime.utcnow().isoformat(),
                 "ip": ip,
             })
+            logger.info("Contact form saved to database")
         except Exception:
             logger.exception("Failed to save contact form to database")
 
-    # Send email notification
+    # --------------------------------------------------------
+    # FIX:
+    # Email sending is independent of DB success/failure.
+    # --------------------------------------------------------
+    email_sent = False
+
     if EMAIL_ENABLED:
         try:
             resend.Emails.send({
@@ -414,12 +431,18 @@ async def contact(request: Request, form: ContactForm):
                 <p>IP Address: {escape(ip)}</p>
                 """
             })
-            logger.info("Contact email sent")
+            email_sent = True
+            logger.info(f"Contact email sent → from {form.email} subject '{form.subject}'")
 
         except Exception:
             logger.exception("Contact email failed")
+    else:
+        logger.warning("Contact email skipped because email is disabled")
 
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "email_sent": email_sent,
+    }
 
 
 # ============================================================
@@ -428,15 +451,19 @@ async def contact(request: Request, form: ContactForm):
 
 @api.get("/providers")
 async def providers(request: Request):
-    db = get_db(request)
+    db = await ensure_db_available(request)
 
-    rows = await db.providers.find().to_list(500)
-    rows = [sanitize_doc(r) for r in rows]
+    try:
+        rows = await db.providers.find().to_list(500)
+        rows = [sanitize_doc(r) for r in rows]
 
-    return {
-        "count": len(rows),
-        "items": rows
-    }
+        return {
+            "count": len(rows),
+            "items": rows
+        }
+    except Exception:
+        logger.exception("Failed to load providers")
+        raise HTTPException(503, "Unable to load providers at this time")
 
 
 # ============================================================
@@ -445,18 +472,25 @@ async def providers(request: Request):
 
 @api.get("/providers/{provider_id}")
 async def provider_detail(provider_id: str, request: Request):
-    db = get_db(request)
+    db = await ensure_db_available(request)
 
     provider_id = provider_id.strip()
 
-    provider = await db.providers.find_one({
-        "provider_id": {"$regex": f"^{provider_id}$", "$options": "i"}
-    })
+    try:
+        provider = await db.providers.find_one({
+            "provider_id": {"$regex": f"^{provider_id}$", "$options": "i"}
+        })
 
-    if not provider:
-        raise HTTPException(404, "Provider not found")
+        if not provider:
+            raise HTTPException(404, "Provider not found")
 
-    return sanitize_doc(provider)
+        return sanitize_doc(provider)
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to load provider detail")
+        raise HTTPException(503, "Unable to load provider at this time")
 
 
 # ============================================================
@@ -465,15 +499,19 @@ async def provider_detail(provider_id: str, request: Request):
 
 @api.get("/services")
 async def services(request: Request):
-    db = get_db(request)
+    db = await ensure_db_available(request)
 
-    rows = await db.services.find().to_list(500)
-    rows = [sanitize_doc(r) for r in rows]
+    try:
+        rows = await db.services.find().to_list(500)
+        rows = [sanitize_doc(r) for r in rows]
 
-    return {
-        "count": len(rows),
-        "items": rows
-    }
+        return {
+            "count": len(rows),
+            "items": rows
+        }
+    except Exception:
+        logger.exception("Failed to load services")
+        raise HTTPException(503, "Unable to load services at this time")
 
 
 # ============================================================
@@ -482,15 +520,19 @@ async def services(request: Request):
 
 @api.get("/locations")
 async def locations(request: Request):
-    db = get_db(request)
+    db = await ensure_db_available(request)
 
-    rows = await db.locations.find().to_list(500)
-    rows = [sanitize_doc(r) for r in rows]
+    try:
+        rows = await db.locations.find().to_list(500)
+        rows = [sanitize_doc(r) for r in rows]
 
-    return {
-        "count": len(rows),
-        "items": rows
-    }
+        return {
+            "count": len(rows),
+            "items": rows
+        }
+    except Exception:
+        logger.exception("Failed to load locations")
+        raise HTTPException(503, "Unable to load locations at this time")
 
 
 # ============================================================
