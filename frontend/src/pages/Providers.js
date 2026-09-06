@@ -3,18 +3,20 @@
 //
 // FIXES INCLUDED:
 //
-// 1️⃣ API response parsing fixed
+// 1️⃣ FIXED runtime error
+//    heroBg was referenced but not defined.
+//
+// 2️⃣ FIXED build error
+//    import must be at the top level.
+//
+// 3️⃣ API response parsing fixed
 //    Backend returns: { count, items }
-//    Frontend previously expected: []
-//    Now supports BOTH formats safely.
 //
-// 2️⃣ Safe provider id detection
-//    Supports provider_id, id, or providerId
+// 4️⃣ Safe provider id detection
 //
-// 3️⃣ Defensive rendering improvements
-//    Handles missing data gracefully
+// 5️⃣ Defensive rendering improvements
 //
-// 4️⃣ Safe async handling using isMounted flag
+// 6️⃣ Safe async handling using isMounted flag
 
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -24,36 +26,37 @@ import { ArrowRight, MapPin, Languages } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { providersApi } from "@/utils/api";
 
+/* ✅ FIX: import must be at top level */
+import heroImage from "../assets/hero/right2.jpg";
+
 export default function Providers() {
+
   const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // fallback image if provider photo missing
   const providerPhotoFallback =
     "https://via.placeholder.com/900x900?text=Provider+Photo";
 
-  // hero background image
-  const heroBg = "/images/header/right2.jpg";
+  /* fallback hero image if main image fails */
+  const heroFallback =
+    "data:image/svg+xml;charset=utf-8," +
+    encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="600">
+<rect width="100%" height="100%" fill="#111827"/>
+<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle"
+font-family="Arial" font-size="40" fill="#ffffff">
+Providers
+</text>
+</svg>`);
 
-  /**
-   * Fetch providers from backend API
-   */
   useEffect(() => {
+
     let isMounted = true;
 
     const fetchProviders = async () => {
       try {
-        const response = await providersApi.getAll();
 
-        /**
-         * Backend may return either:
-         *
-         * 1️⃣ Raw array
-         *    [ {...}, {...} ]
-         *
-         * 2️⃣ Wrapped object
-         *    { count: 3, items: [ {...}, {...} ] }
-         */
+        const response = await providersApi.getAll();
 
         let data = [];
 
@@ -66,16 +69,21 @@ export default function Providers() {
         if (!isMounted) return;
 
         setProviders(data);
+
       } catch (error) {
+
         console.error("Failed to fetch providers:", error);
 
         if (!isMounted) return;
 
         setProviders([]);
+
       } finally {
+
         if (!isMounted) return;
 
         setLoading(false);
+
       }
     };
 
@@ -84,11 +92,9 @@ export default function Providers() {
     return () => {
       isMounted = false;
     };
+
   }, []);
 
-  /**
-   * Animation used for provider cards
-   */
   const fadeInUp = {
     initial: { opacity: 0, y: 24 },
     animate: { opacity: 1, y: 0 },
@@ -111,7 +117,8 @@ export default function Providers() {
         className="relative overflow-hidden"
         data-testid="providers-hero"
         style={{
-          backgroundImage: `url(${heroBg})`,
+          /* ✅ FIX: heroBg replaced with heroImage */
+          backgroundImage: `url(${heroImage || heroFallback})`,
           backgroundSize: "cover",
           backgroundPosition: "center",
         }}
@@ -119,7 +126,9 @@ export default function Providers() {
         <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/55 to-black/25" />
 
         <div className="relative container mx-auto px-4 sm:px-6 lg:px-8 max-w-7xl py-12 sm:py-16 md:py-20 lg:py-24">
+
           <motion.div {...fadeInUp} className="text-center max-w-3xl mx-auto">
+
             <span className="text-xs sm:text-sm font-bold tracking-wide uppercase text-white/90">
               Our Medical Team
             </span>
@@ -132,7 +141,9 @@ export default function Providers() {
               Our board-certified clinicians bring years of experience and a
               commitment to compassionate, patient-centered care.
             </p>
+
           </motion.div>
+
         </div>
       </section>
 
@@ -142,20 +153,28 @@ export default function Providers() {
         data-testid="providers-list"
       >
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 max-w-7xl">
+
           {loading ? (
+
             <div className="text-center py-10">
               <p className="text-muted-foreground">Loading providers...</p>
             </div>
+
           ) : providers.length === 0 ? (
+
             <div className="text-center py-10">
               <p className="text-muted-foreground">
                 No providers found. Please confirm the API is running and seed
                 data is loaded.
               </p>
             </div>
+
           ) : (
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-7 lg:gap-8">
+
               {providers.map((provider, index) => {
+
                 const languages = Array.isArray(provider?.languages)
                   ? provider.languages
                   : [];
@@ -164,9 +183,6 @@ export default function Providers() {
                   ? provider.locations
                   : [];
 
-                /**
-                 * Determine provider id for profile navigation
-                 */
                 const providerId =
                   provider?.provider_id ??
                   provider?.id ??
@@ -176,11 +192,9 @@ export default function Providers() {
                 const canNavigate = Boolean(providerId);
 
                 return (
+
                   <motion.div
-                    key={
-                      providerId ??
-                      `${provider?.name ?? "provider"}-${index}`
-                    }
+                    key={providerId ?? `${provider?.name ?? "provider"}-${index}`}
                     {...fadeInUp}
                     transition={{ delay: Math.min(index * 0.06, 0.3) }}
                     className="
@@ -190,8 +204,10 @@ export default function Providers() {
                       group transition-all duration-300
                     "
                   >
+
                     {/* Provider Image */}
                     <div className="relative overflow-hidden">
+
                       <img
                         src={provider?.photo_url || providerPhotoFallback}
                         alt={provider?.name || "Provider"}
@@ -211,10 +227,12 @@ export default function Providers() {
                           Accepting Patients
                         </div>
                       )}
+
                     </div>
 
                     {/* Provider Info */}
                     <div className="p-5 sm:p-6">
+
                       <h3 className="text-xl sm:text-2xl font-semibold text-foreground mb-1">
                         {provider?.name}
                       </h3>
@@ -228,6 +246,7 @@ export default function Providers() {
                       </p>
 
                       <div className="space-y-2 mb-6">
+
                         <div className="flex items-start gap-2">
                           <Languages className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                           <p className="text-sm text-muted-foreground">
@@ -241,22 +260,23 @@ export default function Providers() {
                             {locations.length ? locations.join(", ") : "—"}
                           </p>
                         </div>
+
                       </div>
 
-                      {/* Profile Button */}
                       {canNavigate ? (
+
                         <Button
                           asChild
                           className="w-full bg-primary text-primary-foreground hover:bg-primary/90 rounded-full"
                         >
-                          <Link
-                            to={`/providers/${encodeURIComponent(providerId)}`}
-                          >
+                          <Link to={`/providers/${encodeURIComponent(providerId)}`}>
                             View Full Profile
                             <ArrowRight className="w-4 h-4 ml-2" />
                           </Link>
                         </Button>
+
                       ) : (
+
                         <Button
                           disabled
                           className="w-full rounded-full"
@@ -265,15 +285,23 @@ export default function Providers() {
                           View Full Profile
                           <ArrowRight className="w-4 h-4 ml-2" />
                         </Button>
+
                       )}
+
                     </div>
+
                   </motion.div>
                 );
+
               })}
+
             </div>
+
           )}
+
         </div>
       </section>
     </>
   );
 }
+

@@ -1,11 +1,12 @@
 // Home.js
-// ✅ ADDITIONS:
-// - Manual dots + arrows for slider
-// - Pause on hover (and on keyboard focus within hero)
-// - Keeps the "only one slide at a time" approach so links remain clickable
-// ✅ LOGIN / 405 "Method Not Allowed" HARDENING:
-// - Explicitly set type="button" on ALL <button> elements so they NEVER submit a parent <form>
-//   (405 often comes from an accidental submit to /login or /api/login)
+// ✅ COMPLETE FILE - DIRECT IMAGE IMPORT VERSION
+// ✅ FIXES APPLIED:
+// - Uses direct image imports instead of /public/images/... for hero slides
+// - Keeps full original page layout and visuals intact
+// - Preloads imported hero images and resolves fallback safely
+// - Prevents broken-image error loops
+// - Uses functional next/prev slide updates to avoid stale state edge cases
+// - Explicitly sets type="button" on all hero control buttons
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -29,6 +30,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { providersApi, servicesApi, locationsApi } from '@/utils/api';
 
+// ✅ DIRECT IMPORTS FOR HERO IMAGES
+// Place files here:
+// src/assets/hero/center01.jpg
+// src/assets/hero/left01.jpg
+// src/assets/hero/right01.jpg
 import heroCenter from '../assets/hero/center01.jpg';
 import heroLeft from '../assets/hero/left01.jpg';
 import heroRight from '../assets/hero/right01.jpg';
@@ -44,16 +50,20 @@ export default function Home() {
   // ✅ Hero slide index
   const [activeSlide, setActiveSlide] = useState(0);
 
-  // ✅ FIX: pause on hover/focus for calmer clicking
+  // ✅ Pause on hover/focus for calmer clicking
   const [isPaused, setIsPaused] = useState(false);
 
-  // ✅ optional: prevent rapid multi-click spam
+  // ✅ Stores resolved hero slide image URLs (actual image or fallback)
+  const [resolvedHeroSlides, setResolvedHeroSlides] = useState([]);
+
+  // ✅ Optional: prevent rapid multi-click spam
   const lastNavAtRef = useRef(0);
   const NAV_THROTTLE_MS = 250;
 
+  // ✅ Hero slides now use imported assets
   const heroSlides = useMemo(
     () => [
-       {
+      {
         key: 'slide-1',
         image: heroCenter,
         alt: 'Primary Care Services',
@@ -84,13 +94,14 @@ export default function Home() {
       </svg>`
     );
 
-  // ✅ preload/decode hero images
+  // ✅ Preload/decode imported hero images and resolve each slide to a safe final source
   useEffect(() => {
     let cancelled = false;
 
-    const preloadAndDecode = async (src) => {
-      await new Promise((resolve) => {
+    const preloadAndResolve = async (src) => {
+      return new Promise((resolve) => {
         const img = new Image();
+
         img.onload = async () => {
           if (img.decode) {
             try {
@@ -99,104 +110,135 @@ export default function Home() {
               // ignore decode failures
             }
           }
-          resolve(true);
+          resolve(src);
         };
-        img.onerror = () => resolve(false);
+
+        img.onerror = () => resolve(heroFallback);
         img.src = src;
       });
     };
 
     (async () => {
-      for (const s of heroSlides) {
-        if (cancelled) return;
-        await preloadAndDecode(s.image);
+      const slidesWithResolvedImages = await Promise.all(
+        heroSlides.map(async (slide) => ({
+          ...slide,
+          resolvedImage: await preloadAndResolve(slide.image),
+        }))
+      );
+
+      if (!cancelled) {
+        setResolvedHeroSlides(slidesWithResolvedImages);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [heroSlides]);
+  }, [heroSlides, heroFallback]);
 
-  // ✅ manual controls helpers
-  const safeSetSlide = (nextIndex) => {
+  const slidesToRender =
+    resolvedHeroSlides.length > 0 ? resolvedHeroSlides : heroSlides;
+
+  const slideCount = slidesToRender.length || 1;
+
+  const currentSlide =
+    slidesToRender[activeSlide] || {
+      key: 'slide-fallback',
+      image: heroFallback,
+      resolvedImage: heroFallback,
+      alt: 'Hero image',
+    };
+
+  const firstResolvedHeroImage =
+    slidesToRender[0]?.resolvedImage || slidesToRender[0]?.image || heroFallback;
+
+  // ✅ Manual controls helper
+  const safeSetSlide = (nextIndexOrUpdater) => {
     const now = Date.now();
     if (now - lastNavAtRef.current < NAV_THROTTLE_MS) return;
     lastNavAtRef.current = now;
 
-    const len = heroSlides.length;
-    const normalized = ((nextIndex % len) + len) % len;
-    setActiveSlide(normalized);
+    setActiveSlide((prev) => {
+      const rawNext =
+        typeof nextIndexOrUpdater === 'function'
+          ? nextIndexOrUpdater(prev)
+          : nextIndexOrUpdater;
+
+      return ((rawNext % slideCount) + slideCount) % slideCount;
+    });
   };
 
-  const goNext = () => safeSetSlide(activeSlide + 1);
-  const goPrev = () => safeSetSlide(activeSlide - 1);
+  // ✅ Functional updates prevent stale state issues
+  const goNext = () => safeSetSlide((prev) => prev + 1);
+  const goPrev = () => safeSetSlide((prev) => prev - 1);
   const goTo = (index) => safeSetSlide(index);
 
-  // ✅ auto-advance timer (pauses on hover/focus)
+  // ✅ Auto-advance timer (pauses on hover/focus)
   useEffect(() => {
-    if (isPaused) return;
+    if (isPaused || slideCount <= 1) return;
 
     const interval = setInterval(() => {
-      setActiveSlide((prev) => (prev + 1) % heroSlides.length);
+      setActiveSlide((prev) => (prev + 1) % slideCount);
     }, 6000);
 
     return () => clearInterval(interval);
-  }, [heroSlides.length, isPaused]);
+  }, [slideCount, isPaused]);
 
-  // ✅ optional: keyboard nav when hero is hovered/focused (Left/Right)
+  // ✅ Keyboard nav when hero is hovered/focused (Left/Right)
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (!isPaused) return; // only when user is "interacting" (paused)
+      if (!isPaused) return;
       if (e.key === 'ArrowLeft') goPrev();
       if (e.key === 'ArrowRight') goNext();
     };
+
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPaused, activeSlide]);
+  }, [isPaused]);
 
   // Data fetching
   useEffect(() => {
     let isMounted = true;
 
     const fetchData = async () => {
-  try {
-    setLoading(true);
-    setLoadError(null);
+      try {
+        setLoading(true);
+        setLoadError(null);
 
-    const [providersRes, servicesRes, locationsRes] = await Promise.all([
-      providersApi.getAll(),
-      servicesApi.getAll(),
-      locationsApi.getAll(),
-    ]);
+        const [providersRes, servicesRes, locationsRes] = await Promise.all([
+          providersApi.getAll(),
+          servicesApi.getAll(),
+          locationsApi.getAll(),
+        ]);
 
-    // Support BOTH response formats
-    const normalize = (res) => {
-      if (Array.isArray(res?.data)) return res.data;
-      if (Array.isArray(res?.data?.items)) return res.data.items;
-      return [];
+        // Support BOTH response formats
+        const normalize = (res) => {
+          if (Array.isArray(res?.data)) return res.data;
+          if (Array.isArray(res?.data?.items)) return res.data.items;
+          return [];
+        };
+
+        const providersData = normalize(providersRes);
+        const servicesData = normalize(servicesRes);
+        const locationsData = normalize(locationsRes);
+
+        if (!isMounted) return;
+
+        setProviders(providersData.slice(0, 3));
+        setServices(servicesData.slice(0, 6));
+        setLocations(locationsData);
+      } catch (error) {
+        if (!isMounted) return;
+        console.error('Failed to fetch data:', error);
+        setLoadError(error);
+      } finally {
+        if (!isMounted) return;
+        setLoading(false);
+      }
     };
 
-    const providersData = normalize(providersRes);
-    const servicesData = normalize(servicesRes);
-    const locationsData = normalize(locationsRes);
-
-    if (!isMounted) return;
-
-    setProviders(providersData.slice(0, 3));
-    setServices(servicesData.slice(0, 6));
-    setLocations(locationsData);
-  } catch (error) {
-    if (!isMounted) return;
-    console.error("Failed to fetch data:", error);
-    setLoadError(error);
-  } finally {
-    if (!isMounted) return;
-    setLoading(false);
-  }
-};
     fetchData();
+
     return () => {
       isMounted = false;
     };
@@ -233,7 +275,8 @@ export default function Home() {
         <div
           className="relative w-full h-[460px] sm:h-[520px] md:h-[620px] lg:h-[720px] overflow-hidden bg-slate-900"
           style={{
-            backgroundImage: `url(${heroSlides[0].image})`,
+            // ✅ Uses resolved imported image for background too
+            backgroundImage: `url(${firstResolvedHeroImage})`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
           }}
@@ -246,7 +289,7 @@ export default function Home() {
         >
           <AnimatePresence mode="wait">
             <motion.div
-              key={heroSlides[activeSlide].key}
+              key={currentSlide.key}
               className="absolute inset-0"
               variants={slideVariants}
               initial="initial"
@@ -255,13 +298,16 @@ export default function Home() {
               style={{ pointerEvents: 'auto' }}
             >
               <img
-                src={heroSlides[activeSlide].image}
-                alt={heroSlides[activeSlide].alt}
+                src={currentSlide.resolvedImage || currentSlide.image || heroFallback}
+                alt={currentSlide.alt}
                 className="w-full h-full object-cover"
-                loading="eager"
-                fetchPriority="high"
-                decoding="sync"
-                onError={(e) => (e.currentTarget.src = heroFallback)}
+                loading={activeSlide === 0 ? 'eager' : 'lazy'}
+                fetchPriority={activeSlide === 0 ? 'high' : 'auto'}
+                decoding="async"
+                onError={(e) => {
+                  e.currentTarget.onerror = null;
+                  e.currentTarget.src = heroFallback;
+                }}
               />
 
               <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/50 to-transparent flex items-center">
@@ -344,7 +390,7 @@ export default function Home() {
           {/* ✅ Arrows */}
           <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-3 sm:px-4 md:px-6 z-20 pointer-events-none">
             <button
-              type="button" // ✅ IMPORTANT: never submit a form
+              type="button"
               onClick={() => {
                 setIsPaused(true);
                 goPrev();
@@ -356,7 +402,7 @@ export default function Home() {
             </button>
 
             <button
-              type="button" // ✅ IMPORTANT: never submit a form
+              type="button"
               onClick={() => {
                 setIsPaused(true);
                 goNext();
@@ -370,12 +416,12 @@ export default function Home() {
 
           {/* ✅ Dots */}
           <div className="absolute bottom-5 sm:bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2">
-            {heroSlides.map((_, idx) => {
+            {slidesToRender.map((_, idx) => {
               const isActive = idx === activeSlide;
               return (
                 <button
                   key={`dot-${idx}`}
-                  type="button" // ✅ IMPORTANT: never submit a form
+                  type="button"
                   onClick={() => {
                     setIsPaused(true);
                     goTo(idx);
@@ -577,6 +623,7 @@ export default function Home() {
                   alt={provider.name}
                   className="w-full h-56 sm:h-64 object-cover group-hover:scale-105 transition-transform duration-300"
                   onError={(e) => {
+                    e.currentTarget.onerror = null;
                     e.currentTarget.src = providerPhotoFallback;
                   }}
                 />
